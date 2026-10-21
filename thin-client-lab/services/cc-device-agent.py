@@ -130,6 +130,27 @@ def check(ok, detail="", severity="fail"):
     return {"ok": ok, "detail": detail, "severity": severity}
 
 
+def ini_values(path):
+    vals = {}
+    try:
+        for line in open(path):
+            if "=" in line and not line.lstrip().startswith((";", "#", "[")):
+                k, v = line.split("=", 1)
+                vals[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return vals
+
+
+def data_channels_blocked():
+    """(ok, detail): nothing can leave an agent desktop over RDP - no clipboard,
+    drives, printers or other device redirection, in either direction."""
+    x, s = ini_values("/etc/xrdp/xrdp.ini"), ini_values("/etc/xrdp/sesman.ini")
+    bad = [k for k in ("cliprdr", "rdpdr", "rail") if x.get(k, "true").lower() != "false"]
+    bad += [k for k in ("RestrictOutboundClipboard", "RestrictInboundClipboard") if s.get(k, "none").lower() != "all"]
+    return (not bad, "clipboard, drives and printers blocked" if not bad else "allowed: " + ", ".join(bad))
+
+
 def compliance():
     c = {}
     joined = cached("adjoin", 300, lambda: sh(["adcli", "testjoin", "--domain", DOMAIN or ""]).returncode == 0)
@@ -146,6 +167,7 @@ def compliance():
         c["per_user_caps"] = check(os.path.exists("/etc/systemd/system/user-.slice.d/50-cc-limits.conf"),
                                    "CPU/RAM cap per agent")
         c["kiosk_mode"] = check(os.path.exists("/etc/xdg/xfce4/kiosk/kioskrc"), "desktop locked for agents")
+        c["no_data_out"] = check(*data_channels_blocked())
         term = "/usr/bin/xfce4-terminal"
         c["terminal_restricted"] = check(not os.path.exists(term) or os.stat(term).st_mode & 0o007 == 0,
                                          "terminal admins-only")

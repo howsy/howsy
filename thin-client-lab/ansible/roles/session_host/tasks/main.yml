@@ -43,6 +43,16 @@
   loop: "{{ xrdp_channels | dict2items }}"
   notify: Restart xrdp
 
+# Second layer behind cliprdr=false: even if the channel is ever switched back
+# on, xrdp refuses clipboard data in both directions (text, files and images).
+- name: Session lockdown - no clipboard in or out, whatever the client asks for
+  ansible.builtin.lineinfile:
+    path: /etc/xrdp/sesman.ini
+    regexp: "^{{ item }}="
+    line: "{{ item }}=all"
+  loop: [RestrictOutboundClipboard, RestrictInboundClipboard]
+  notify: Restart xrdp
+
 - name: Reconnect a user to their existing session even from a different screen size
   ansible.builtin.lineinfile:
     path: /etc/xrdp/sesman.ini

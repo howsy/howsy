@@ -15,10 +15,14 @@ def test_xrdp_running_and_enabled(lab, session_host):
 
 
 def test_session_lockdown_channels(lab, session_host):
-    """Clipboard, drive and printer redirection are off."""
+    """Clipboard, drive and printer redirection are off, and the clipboard is
+    refused in both directions even if the channel were switched back on."""
     ini = lab.host(session_host).file("/etc/xrdp/xrdp.ini").content_string
     for line in ("cliprdr=false", "rdpdr=false"):
         assert f"\n{line}" in ini, line
+    sesman = lab.host(session_host).file("/etc/xrdp/sesman.ini").content_string
+    for line in ("RestrictOutboundClipboard=all", "RestrictInboundClipboard=all"):
+        assert f"\n{line}" in sesman, line
 
 
 def test_no_root_rdp_login(lab, session_host):
@@ -76,3 +80,4 @@ def test_home_folders_come_from_the_file_server(lab, cfg, session_host):
     h.run(f"su - {user} -c true")
     fstype = h.check_output(f"findmnt -n -o FSTYPE -T /home/{user}")
     assert fstype in ("nfs4", "nfs", "cifs", "autofs"), fstype
+

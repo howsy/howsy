@@ -73,6 +73,7 @@ The automated `test_04_apps.py` only proves each app is reachable from each plac
 | U-3 | Leave the endpoint idle for longer than the idle timeout. | Screen locks and needs the AD password. |
 | U-4 | Open `chrome://policy` in Chrome. | The policies from `cc-policy.json` show as "Platform / Mandatory". Downloads, DevTools and incognito are blocked. |
 | D-1 | Reboot a home endpoint. | The disk is encrypted. Write down how it unlocks (passphrase, TPM, network unlock). An agent should not need a separate disk passphrase unless that is the decision. |
+| X-1 | On an AD laptop, open Remote Desktop (`mstsc`) → *Show Options* → *Local Resources*, tick Clipboard, Printers and *More… → Drives*, and connect to the farm as an agent. Copy text from the laptop and paste it in the desktop, then the other way. Look in the desktop's file manager for the laptop's drives, and try to print. | Nothing crosses in either direction: no paste, no laptop drives, no laptop printers. The server decides (`cliprdr`/`rdpdr` off, clipboard restricted in `sesman.ini`), whatever the laptop asks for. The console shows `no data out` as passing for each session host. |
 
 ## VPN on real hardware (checklist: "VPN connects before login")
 
