@@ -43,6 +43,9 @@ Time: about 30 minutes of setup, plus 20–30 minutes for the first full run.
    sudo reboot
    ```
    `open-vm-tools-desktop` gives you copy/paste between your computer and the VM, and resizing.
+   If copy/paste still doesn't work (common on the newest Ubuntu releases), type
+   `sudo apt install -y openssh-server` and work from Windows instead:
+   `ssh <your-user>@<vm-ip>` in PowerShell (find the IP with `ip -4 addr show`). Pasting works there.
 
 ## 4. Install Docker
 
@@ -148,6 +151,7 @@ Use `stop`/`start` instead to pause.
 | Problem | Fix |
 |---|---|
 | Boot shows *"piix4_smbus … SMBus Host Controller not enabled!"* | Harmless VMware message. Ignore it. With *Easy Install*, wait until Ubuntu restarts at its login screen. |
+| Copy/paste between Windows and the VM doesn't work | Install `open-vm-tools-desktop`, reboot, and enable *VM → Settings → Options → Guest Isolation → copy and paste*. On new Ubuntu releases (Wayland desktop) it may still not work. Then install `openssh-server` in the VM and run the commands from Windows PowerShell with `ssh <user>@<vm-ip>`, where pasting works normally. |
 | VMware: *"does not support virtualized performance counters"*, *"Module 'VPMC' power on failed"* | Power the VM off → Edit settings → Processors → untick **Virtualize CPU performance counters** (and the other virtualization boxes). If it is greyed out: close VMware, add or change `vpmc.enable = "FALSE"` in the VM's `.vmx` file. |
 | VMware: errors about VT-x, Hyper-V or Credential Guard | Untick the virtualization boxes as above and update VMware Workstation to 17.5 or newer. |
 | `permission denied ... docker.sock` | You did not log out/in after step 4. Log out and back in. |
