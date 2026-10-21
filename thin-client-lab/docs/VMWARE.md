@@ -24,6 +24,9 @@ Time: about 30 minutes of setup, plus 20–30 minutes for the first full run.
    - Processors: **4 cores** or more.
    - Network adapter: **NAT**.
    - Display: turn on 3D acceleration if offered (smoother desktop).
+   - Processors → *Virtualization engine*: leave **all boxes unticked** (VT-x/AMD-V, CPU
+     performance counters, IOMMU). The lab doesn't need them, and they often stop the VM from
+     starting.
 4. Finish and power on the VM.
 
 ## 3. Install Ubuntu
@@ -138,6 +141,8 @@ Use `stop`/`start` instead to pause.
 
 | Problem | Fix |
 |---|---|
+| VMware: *"does not support virtualized performance counters"*, *"Module 'VPMC' power on failed"* | Power the VM off → Edit settings → Processors → untick **Virtualize CPU performance counters** (and the other virtualization boxes). If it is greyed out: close VMware, add or change `vpmc.enable = "FALSE"` in the VM's `.vmx` file. |
+| VMware: errors about VT-x, Hyper-V or Credential Guard | Untick the virtualization boxes as above and update VMware Workstation to 17.5 or newer. |
 | `permission denied ... docker.sock` | You did not log out/in after step 4. Log out and back in. |
 | Very slow, or containers get killed | Give the VM more RAM (16 GB) and CPUs. Check with `free -h`. |
 | A provisioning task failed | Run `./lab.sh provision` again. Most steps can be repeated safely. The error is just above **PLAY RECAP**. |
