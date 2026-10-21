@@ -1,2 +1,6 @@
 console_port: 8090
 console_admin_group: cc-admins       # SSSD shows AD group names in lower case
+console_helpdesk_group: cc-helpdesk   # support actions only
+console_viewer_group: cc-viewers      # read-only
+console_four_eyes: true               # a second admin must promote a change to every device
+console_idle_minutes: 30

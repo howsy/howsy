@@ -39,6 +39,8 @@
 - name: Console configuration
   ansible.builtin.copy:
     content: "{{ {'port': console_port, 'realm': ad_realm, 'admin_group': console_admin_group,
+                 'helpdesk_group': console_helpdesk_group, 'viewer_group': console_viewer_group,
+                 'four_eyes': console_four_eyes, 'idle_minutes': console_idle_minutes,
                  'device_token': console_device_token, 'db': '/var/lib/cc-console/console.db',
                  'seed_catalog': '/etc/cc-console/seed-catalog.json',
                  'ui_dir': '/usr/local/share/cc-console/ui'} | to_nice_json }}\n"

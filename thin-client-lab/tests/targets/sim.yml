@@ -86,4 +86,7 @@ console:
   url: http://10.10.0.25:8090
   host: broker-01
   admin: {username: itadmin1, password: "${ITADMIN_PASSWORD:-It-Admin-Pass1!}"}
+  admin2: {username: itadmin2, password: "${ITADMIN_PASSWORD:-It-Admin-Pass1!}"}   # second admin (two-person rule)
+  helpdesk: {username: helpdesk1, password: "${HELPDESK_PASSWORD:-Helpdesk-Pass1!}"}
+  viewer: {username: viewer1, password: "${VIEWER_PASSWORD:-Viewer-Pass1!}"}
   laptop_device: laptop-sim-01

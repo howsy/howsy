@@ -18,6 +18,13 @@ with their AD account (members of the admin group only) and get:
 Device auth: a shared enrollment token (Linux agents, root) or Kerberos (the
 laptop shell runs as the logged-in user). Admin auth: AD password checked with
 Kerberos, group membership through SSSD; session cookie + CSRF header.
+
+IT roles come from AD groups and are enforced here, not in the browser:
+  viewer    read-only (CC-Viewers)
+  helpdesk  support actions on devices and sessions (CC-Helpdesk)
+  admin     everything, incl. catalog and policies (CC-Admins)
+A change published to the pilot ring must be promoted to every device by a
+different admin (two-person rule), and idle admin sessions end after 30 min.
 """
 import base64
 import collections
@@ -43,26 +50,32 @@ CONF = json.load(open(os.environ.get("CC_CONSOLE_CONF", "/etc/cc-console/console
 UI_DIR = CONF.get("ui_dir", "/usr/local/share/cc-console/ui")
 ONLINE_SECONDS = 60
 SESSION_HOURS = 8
+IDLE_MINUTES = CONF.get("idle_minutes", 30)
+FOUR_EYES = CONF.get("four_eyes", True)
+ROLE_GROUPS = [("admin", CONF["admin_group"]), ("helpdesk", CONF.get("helpdesk_group")),
+               ("viewer", CONF.get("viewer_group"))]
+LEVELS = {"viewer": 0, "helpdesk": 1, "admin": 2}
 UI_FILES = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
 MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 
-# What an admin may ask a device to do, by device role. Devices only ever run
-# actions from this list, with their own fixed implementation.
+# What an admin may ask a device to do, by device role, and the lowest IT role
+# allowed to ask. Devices only ever run actions from this list, with their own
+# fixed implementation.
 ACTIONS = {
-    "refresh":           {"roles": "*", "label": "Refresh now"},
-    "message":           {"roles": ["session_host", "laptop"], "label": "Send message", "args": ["text"]},
-    "screenshot":        {"roles": ["laptop"], "label": "View screen"},
-    "screenshot_user":   {"roles": ["session_host"], "label": "View session", "args": ["user"]},
-    "logoff_user":       {"roles": ["session_host"], "label": "Log user off", "args": ["user"], "confirm": True},
-    "start_app":         {"roles": ["laptop"], "label": "Start Genesys", "args": ["app"]},
-    "reconnect_desktop": {"roles": ["laptop"], "label": "Reconnect desktop"},
-    "sign_out":          {"roles": ["laptop"], "label": "Sign out", "confirm": True},
-    "collect_logs":      {"roles": ["session_host", "broker", "endpoint"], "label": "Collect logs"},
+    "refresh":           {"roles": "*", "label": "Refresh now", "level": "helpdesk"},
+    "message":           {"roles": ["session_host", "laptop"], "label": "Send message", "args": ["text"], "level": "helpdesk"},
+    "screenshot":        {"roles": ["laptop"], "label": "View screen", "level": "helpdesk"},
+    "screenshot_user":   {"roles": ["session_host"], "label": "View session", "args": ["user"], "level": "helpdesk"},
+    "logoff_user":       {"roles": ["session_host"], "label": "Log user off", "args": ["user"], "confirm": True, "level": "admin"},
+    "start_app":         {"roles": ["laptop"], "label": "Start Genesys", "args": ["app"], "level": "helpdesk"},
+    "reconnect_desktop": {"roles": ["laptop"], "label": "Reconnect desktop", "level": "helpdesk"},
+    "sign_out":          {"roles": ["laptop"], "label": "Sign out", "confirm": True, "level": "admin"},
+    "collect_logs":      {"roles": ["session_host", "broker", "endpoint"], "label": "Collect logs", "level": "helpdesk"},
     "restart_service":   {"roles": ["session_host", "broker"], "label": "Restart service", "args": ["service"],
-                          "confirm": True},
-    "apply_catalog":     {"roles": ["session_host"], "label": "Re-apply desktop"},
-    "apply_policy":      {"roles": ["session_host", "endpoint"], "label": "Re-apply policies"},
-    "reboot":            {"roles": ["session_host", "broker", "endpoint"], "label": "Reboot", "confirm": True},
+                          "confirm": True, "level": "admin"},
+    "apply_catalog":     {"roles": ["session_host"], "label": "Re-apply desktop", "level": "helpdesk"},
+    "apply_policy":      {"roles": ["session_host", "endpoint"], "label": "Re-apply policies", "level": "helpdesk"},
+    "reboot":            {"roles": ["session_host", "broker", "endpoint"], "label": "Reboot", "confirm": True, "level": "admin"},
 }
 RINGS = ["pilot", "broad"]
 POLICY_ROLES = ("session_host", "endpoint")
@@ -80,7 +93,7 @@ lock = threading.RLock()
 wake = threading.Condition(lock)
 db = sqlite3.connect(CONF.get("db", "/var/lib/cc-console/console.db"), check_same_thread=False)
 db.row_factory = sqlite3.Row
-admin_sessions = {}                         # cookie -> (user, expiry)
+admin_sessions = {}                         # cookie -> {"user", "role", "expires", "last"}
 login_failures = collections.defaultdict(list)
 metrics = collections.defaultdict(lambda: collections.deque(maxlen=120))  # device -> (ts, cpu, mem%)
 
@@ -376,6 +389,15 @@ def in_group(user, group):
         return False
 
 
+def it_role(user):
+    """Highest console role the user's AD groups give, or None."""
+    return next((role for role, group in ROLE_GROUPS if group and in_group(user, group)), None)
+
+
+def can(role, level):
+    return LEVELS.get(role, -1) >= LEVELS[level]
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "cc-console"
 
@@ -405,20 +427,32 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("body too large")
         return json.loads(self.rfile.read(n) or b"{}")
 
-    def admin(self):
-        """Signed-in admin for this request, or None (401 already sent)."""
+    def admin(self, level="viewer"):
+        """Signed-in IT user with at least `level`, or None (error already sent).
+        Sessions end after SESSION_HOURS, or after IDLE_MINUTES without a request."""
         cookie = self.headers.get("Cookie", "")
         token = next((c.split("=", 1)[1] for c in cookie.split("; ") if c.startswith("ccconsole=")), "")
+        now = time.time()
         with lock:
-            user, exp = admin_sessions.get(token, (None, 0))
-        if not user or exp < time.time():
+            sess = admin_sessions.get(token)
+            if sess and (sess["expires"] < now or sess["last"] < now - IDLE_MINUTES * 60):
+                admin_sessions.pop(token, None)
+                sess = None
+            if sess:
+                sess["last"] = now
+        if not sess:
             self.send(401, {"error": "sign in"})
             return None
         if self.command == "POST" or self.command == "PUT":
             if self.headers.get("X-CC-Console") != "1":       # CSRF: custom header needs same origin
                 self.send(403, {"error": "missing X-CC-Console header"})
                 return None
-        return user
+        if not can(sess["role"], level):
+            audit(sess["user"], "denied", self.path, f"needs {level}, has {sess['role']}")
+            self.send(403, {"error": f"your role ({sess['role']}) cannot do this; it needs {level}"})
+            return None
+        self.role = sess["role"]
+        return sess["user"]
 
     def device_auth(self):
         """(auth kind, user) for a device request, or None (error sent)."""
@@ -454,7 +488,8 @@ class Handler(BaseHTTPRequestHandler):
         if not user:
             return
         if p == "/api/me":
-            return self.send(200, {"user": user})
+            return self.send(200, {"user": user, "role": self.role, "four_eyes": FOUR_EYES,
+                                   "idle_minutes": IDLE_MINUTES})
         if p == "/api/summary":
             return self.api_summary()
         if p == "/api/devices":
@@ -492,12 +527,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.agent_result()
             if not p.startswith("/api/"):
                 return self.send(404, {"error": "not found"})
-            user = self.admin()
-            if not user:
-                return
             if p == "/api/logout":
                 return self.api_logout()
-            if p.startswith("/api/devices/") and p.endswith("/actions"):
+            # Device actions check the action's own level; everything else here changes
+            # configuration and needs an admin.
+            is_action = p.startswith("/api/devices/") and p.endswith("/actions")
+            user = self.admin("helpdesk" if is_action else "admin")
+            if not user:
+                return
+            if is_action:
                 return self.api_action(user, p.split("/")[3])
             if p.startswith("/api/devices/") and p.endswith("/ring"):
                 return self.api_set_ring(user, p.split("/")[3])
@@ -510,6 +548,8 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/policy":
                 return self.api_policy_publish(user)
             if p == "/api/policy/promote":
+                if not self.second_admin(user, "policy"):
+                    return
                 v = promote_version("policy")
                 audit(user, "promoted policies", f"v{v}", "pilot -> broad")
                 return self.send(200, {"version": v})
@@ -535,18 +575,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(429, {"error": "too many attempts, wait 5 minutes"})
         req = self.body()
         user = req.get("username", "").strip().lower().split("\\")[-1].split("@")[0]
-        ok = bool(user) and check_ad_password(user, req.get("password", "")) and in_group(user, CONF["admin_group"])
-        if not ok:
+        role = it_role(user) if user and check_ad_password(user, req.get("password", "")) else None
+        if not role:
             with lock:
                 login_failures[ip].append(now)
             audit(user or "?", "login failed", ip)
-            return self.send(403, {"error": "wrong password, or not a member of " + CONF["admin_group"]})
+            return self.send(403, {"error": "wrong password, or not in an IT group ("
+                                   + ", ".join(g for _, g in ROLE_GROUPS if g) + ")"})
         token = secrets.token_urlsafe(32)
         with lock:
-            admin_sessions[token] = (user, now + SESSION_HOURS * 3600)
-        audit(user, "signed in", ip)
+            admin_sessions[token] = {"user": user, "role": role, "expires": now + SESSION_HOURS * 3600, "last": now}
+        audit(user, "signed in", f"{ip} as {role}")
         secure = "; Secure" if CONF.get("tls_cert") else ""
-        self.send(200, {"user": user}, headers=[
+        self.send(200, {"user": user, "role": role}, headers=[
             ("Set-Cookie", f"ccconsole={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_HOURS*3600}{secure}")])
 
     def api_logout(self):
@@ -672,7 +713,8 @@ class Handler(BaseHTTPRequestHandler):
         d["history"] = list(metrics[dev])[-60:]
         if d["role"] == "session_host":
             d["sessions"] = with_laptops(d, all_devices())
-        d["actions"] = {k: v for k, v in ACTIONS.items() if v["roles"] == "*" or d["role"] in v["roles"]}
+        d["actions"] = {k: v for k, v in ACTIONS.items()
+                        if (v["roles"] == "*" or d["role"] in v["roles"]) and can(self.role, v["level"])}
         self.send(200, d)
 
     def api_sessions(self):
@@ -691,6 +733,9 @@ class Handler(BaseHTTPRequestHandler):
             r = db.execute("SELECT role FROM devices WHERE id=?", (dev,)).fetchone()
         if not r or not spec or (spec["roles"] != "*" and r["role"] not in spec["roles"]):
             return self.send(400, {"error": f"action {action!r} not available for this device"})
+        if not can(self.role, spec["level"]):
+            audit(user, "denied", dev, f"{action} needs {spec['level']}, has {self.role}")
+            return self.send(403, {"error": f"your role ({self.role}) cannot {spec['label'].lower()}; it needs {spec['level']}"})
         for a in spec.get("args", []):
             if not str(args.get(a, "")).strip():
                 return self.send(400, {"error": f"missing {a}"})
@@ -742,7 +787,24 @@ class Handler(BaseHTTPRequestHandler):
         audit(user, "published catalog", f"v{v}", f"{len(items)} systems, to pilot ring")
         self.send(200, {"version": v, "ring": "pilot"})
 
+    def second_admin(self, user, kind):
+        """Two-person rule: the admin who published the pilot version may not be
+        the one who sends it to every device."""
+        if not FOUR_EYES:
+            return True
+        versions, rings, _ = VERSIONED[kind]
+        with lock:
+            by = db.execute(f"SELECT v.created_by FROM {rings} r JOIN {versions} v ON v.version = r.version "
+                            "WHERE r.ring = 'pilot'").fetchone()["created_by"]
+        if by == user:
+            audit(user, "denied", f"promote {kind}", "same admin who published it")
+            self.send(403, {"error": f"you published this version; a second admin must check it and promote it"})
+            return False
+        return True
+
     def api_promote(self, user):
+        if not self.second_admin(user, "catalog"):
+            return
         v = promote_version("catalog")
         audit(user, "promoted catalog", f"v{v}", "pilot -> broad")
         self.send(200, {"version": v})

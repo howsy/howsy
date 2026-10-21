@@ -5,6 +5,18 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const main = $("#main");
 let refreshTimer = null;
 let liveToken = 0;
+let ME = { user: "", role: "viewer", four_eyes: true };
+const ROLE_LABEL = { admin: "Admin · CC-Admins", helpdesk: "Helpdesk · CC-Helpdesk", viewer: "Read-only · CC-Viewers" };
+const isAdmin = () => ME.role === "admin";
+const canHelp = () => ME.role === "admin" || ME.role === "helpdesk";
+// The server enforces every permission; this only hides what the role cannot use.
+function readOnly(note) {
+  main.querySelectorAll(".editor input, .editor select, .card input, .card select, [data-unchip], [data-delrl], [data-addrl], " +
+    "[data-chip-add], [data-del], #add, #add-assign, [data-adel], [data-aup], [data-amode], [data-urlmode], [data-fw], [data-rollback], #promote")
+    .forEach(e => { e.disabled = true; });
+  const bar = $(".publish-bar", main);
+  if (bar) bar.innerHTML = `<span class="muted">${icon("policy")} ${note}</span>`;
+}
 
 // ---- helpers -------------------------------------------------------------
 function esc(s) {
@@ -84,16 +96,18 @@ $("#login-form").addEventListener("submit", async e => {
   const f = new FormData(e.target);
   $("#login-error").textContent = "";
   try {
-    const r = await api("/api/login", { method: "POST", body: { username: f.get("username"), password: f.get("password") } });
+    await api("/api/login", { method: "POST", body: { username: f.get("username"), password: f.get("password") } });
     e.target.reset();
-    start(r.user);
+    start(await api("/api/me"));
   } catch (err) { $("#login-error").textContent = err.message; }
 });
 $("#logout").addEventListener("click", async () => { await api("/api/logout", { method: "POST" }).catch(() => {}); showLogin(); });
 
-function start(user) {
-  $("#me").textContent = user;
-  $("#avatar").textContent = user.replace(/[^a-z]/gi, "").slice(0, 2) || "?";
+function start(me) {
+  ME = me;
+  $("#me").textContent = me.user;
+  $("#my-role").textContent = ROLE_LABEL[me.role] || me.role;
+  $("#avatar").textContent = me.user.replace(/[^a-z]/gi, "").slice(0, 2) || "?";
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   route();
@@ -214,8 +228,8 @@ async function device(id) {
         </div>
         <div class="field-label">CPU, last 15 minutes</div>${spark(d.history)}</div>
     </div>
-    <div class="card mt"><div class="card-head"><h2>Actions</h2></div><div class="action-grid">
-      ${d.role === "laptop" ? `<button class="primary" id="watch-laptop">${icon("eye")}View laptop screen</button>` : ""}
+    <div class="card mt"><div class="card-head"><h2>Actions</h2>${!acts.length && d.role !== "laptop" || !canHelp() ? `<span class="muted">none for your role</span>` : ""}</div><div class="action-grid">
+      ${d.role === "laptop" && canHelp() ? `<button class="primary" id="watch-laptop">${icon("eye")}View laptop screen</button>` : ""}
       ${acts.map(([k, a]) => `<button data-action="${k}" class="${a.confirm ? "danger" : ""}">${esc(a.label)}</button>`).join("")}
     </div></div>
     ${d.role === "session_host" ? `<div class="card flush mt"><div class="card-head"><h2>${icon("sessions")}Agent desktops on this host</h2></div>${sessionTable(d.sessions.map(s => ({ ...s, host: d.id })))}</div>` : ""}
@@ -226,6 +240,7 @@ async function device(id) {
         <td class="muted">${esc(c.created_by)}</td><td>${c.result && !c.has_image ? `<button class="link" data-result="${c.id}">output</button>` : ""}</td></tr>`).join("") ||
         "<tr><td class='muted'>None yet.</td></tr>"}</tbody></table></div></div>
     </div>`;
+  if (!isAdmin()) $("#ring").disabled = true;
   $("#ring").onchange = async e => { await api(`/api/devices/${encodeURIComponent(id)}/ring`, { method: "POST", body: { ring: e.target.value } }); toast(`${id} moved to ${e.target.value}`); };
   if ($("#watch-laptop")) $("#watch-laptop").onclick = () => liveView(id, "screenshot", {}, `${id} · laptop screen`);
   main.querySelectorAll("[data-action]").forEach(b => b.onclick = () => runAction(id, b.dataset.action, d.actions[b.dataset.action]));
@@ -311,9 +326,9 @@ function sessionTable(list) {
       <td>${s.laptop ? devLink(s.laptop) : `<span class="faint">${s.laptop === undefined ? "" : "–"}</span>`}</td>
       <td>${s.genesys == null ? `<span class="faint">–</span>` : s.genesys ? `<span class="badge b-ok">running</span>` : `<span class="badge b-plain">not running</span>`}</td>
       <td>${meter(s.cpu)}</td><td class="mono">${s.mem_mb} MB</td><td class="muted">${esc(s.since)}</td>
-      <td class="actions"><div class="row"><button data-watch="${esc(s.host)}|${esc(s.user)}">${icon("eye")}Watch</button>
-        <button data-msg="${esc(s.host)}|${esc(s.user)}">${icon("msg")}Message</button>
-        <button class="danger" data-logoff="${esc(s.host)}|${esc(s.user)}">${icon("power")}Log off</button></div></td></tr>`).join("")}</tbody></table></div>`;
+      <td class="actions"><div class="row">${canHelp() ? `<button data-watch="${esc(s.host)}|${esc(s.user)}">${icon("eye")}Watch</button>
+        <button data-msg="${esc(s.host)}|${esc(s.user)}">${icon("msg")}Message</button>` : ""}
+        ${isAdmin() ? `<button class="danger" data-logoff="${esc(s.host)}|${esc(s.user)}">${icon("power")}Log off</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>`;
 }
 function bindSessionButtons() {
   main.querySelectorAll("[data-watch]").forEach(b => b.onclick = () => {
@@ -341,12 +356,20 @@ async function sessions() {
 function ringsCard(kind, data, devs, countLabel) {
   return `<div class="card flush"><div class="card-head"><h2>${icon("rocket")}Rings</h2>
       <div class="ring-strip"><span class="ring">Pilot <b>v${data.rings.pilot}</b></span><span class="ring">Broad <b>v${data.rings.broad}</b></span>
-      <button class="primary" id="promote" ${data.rings.pilot === data.rings.broad ? "disabled" : ""}>Promote pilot → broad</button></div></div>
+      ${promoteButton(data)}</div></div>
     <div class="table-wrap"><table><thead><tr><th>Version</th><th>By</th><th>When</th><th>${countLabel}</th><th></th></tr></thead><tbody>
       ${data.versions.map(v => `<tr><td><b>v${v.version}</b> ${v.version === data.rings.broad ? `<span class="badge b-ok">broad</span>` : ""}
         ${v.version === data.rings.pilot ? `<span class="badge b-violet">pilot</span>` : ""}<div class="muted" style="font-size:12.5px">${esc(v.note || "")}</div></td>
         <td>${esc(v.created_by)}</td><td class="muted">${dateTime(v.created_at)}</td><td>${devs(v)}</td>
         <td><button class="link" data-rollback="${v.version}">${icon("undo")}Roll back</button></td></tr>`).join("")}</tbody></table></div></div>`;
+}
+function promoteButton(data) {
+  const pilot = data.versions.find(v => v.version === data.rings.pilot);
+  const same = data.rings.pilot === data.rings.broad;
+  const mine = ME.four_eyes && pilot && pilot.created_by === ME.user;
+  return `<button class="primary" id="promote" ${same || mine ? "disabled" : ""}
+    title="${mine ? "You published this version: a second admin must check and promote it" : ""}">Promote pilot → broad</button>
+    ${mine && !same ? `<span class="badge b-warn" title="Two-person rule">needs a second admin</span>` : ""}`;
 }
 function bindRings(kind, redraw) {
   $("#promote").onclick = async () => { const r = await api(`/api/${kind}/promote`, { method: "POST" }); toast(`v${r.version} is now on every device`); redraw(); };
@@ -393,6 +416,7 @@ async function apps(reset) {
     } catch (e) { toast(e.message); }
   };
   bindRings("catalog", apps);
+  if (!isAdmin()) readOnly("Read-only: only CC-Admins can change the desktop catalog.");
 }
 
 // ---- policies: browser URL rules, outbound firewall, limits, assignments -----------
@@ -524,6 +548,7 @@ async function policies(reset) {
     } catch (e) { toast(e.message); }
   };
   bindRings("policy", policies);
+  if (!isAdmin()) readOnly("Read-only: only CC-Admins can change policies.");
 }
 
 // ---- activity -----------------------------------------------------------------
@@ -544,4 +569,4 @@ async function activity() {
 }
 
 // ---- start -------------------------------------------------------------------
-api("/api/me").then(r => start(r.user)).catch(() => showLogin());
+api("/api/me").then(start).catch(() => showLogin());

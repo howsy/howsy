@@ -8,7 +8,7 @@ import pytest
 
 from conftest import CFG
 from lib import q, wait_for
-from test_12_console import Console
+from test_12_console import Console, signed_in
 
 pytestmark = pytest.mark.skipif("console" not in CFG, reason="no console in targets")
 URLS = "/etc/opt/chrome/policies/managed/cc-urls.json"
@@ -87,7 +87,7 @@ def test_url_and_firewall_policy_by_ring(lab, cfg, c):
         # Broad ring is untouched until promotion.
         assert "blocked.example.com" not in url_rules(broad).get("URLBlocklist", [])
         assert tcp_as(broad, agent, *DC_LDAP), "broad ring changed before promotion"
-        c.post("/api/policy/promote")
+        signed_in(cfg, "admin2").post("/api/policy/promote")   # two-person rule
         wait_for(lambda: not tcp_as(broad, agent, *DC_LDAP), 45, what="firewall on the broad host after promotion")
         applied = {d["id"]: d["applied"] for d in c.get("/api/policy")["devices"]}
         assert not applied[broad_name].get("error"), applied[broad_name]

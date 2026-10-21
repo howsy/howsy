@@ -75,6 +75,8 @@ ensure_user() {   # ensure_user <name> <password> <group>
 }
 ensure_user helpdesk1 "${HELPDESK_PASSWORD:-Helpdesk-Pass1!}" CC-Helpdesk
 ensure_user viewer1 "${VIEWER_PASSWORD:-Viewer-Pass1!}" CC-Viewers
+# A second owner: promoting a change to every device needs a different admin than the one who published it.
+ensure_user itadmin2 "$ITADMIN_PASSWORD" CC-Admins
 
 # svc-console may change the membership of the agents group, and nothing else
 # (the console's People page). WP on the "member" attribute of that one group.

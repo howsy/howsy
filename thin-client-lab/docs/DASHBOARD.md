@@ -3,7 +3,7 @@
 One place to run the call-center fleet: every agent laptop, session host, endpoint and the broker.
 It reports what each device is doing, checks that each one is set up correctly, and lets IT act on
 it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. Sign in with
-`itadmin1` / `It-Admin-Pass1!`. Only members of the AD group **CC-Admins** can sign in.
+`itadmin1` / `It-Admin-Pass1!` (admin; `itadmin2` is a second admin, `helpdesk1` / `Helpdesk-Pass1!` and `viewer1` / `Viewer-Pass1!` show the other roles). Only members of the IT groups can sign in.
 
 | Overview | Device page | Live view of an agent's desktop |
 |---|---|---|
@@ -36,7 +36,18 @@ it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. S
   local rules and works-council agreements before the pilot.
 - Devices only run actions from a fixed list (`ACTIONS` in `services/cc_console.py`). There is no
   "run any command" button. Services that can be restarted are allow-listed per role.
-- Admin sign-in is checked against AD (Kerberos) and the CC-Admins group. The session is an
+- **IT staff are limited too (least privilege, enforced by the server, not the browser).** Roles come from AD groups:
+  | Role | AD group | Can |
+  |---|---|---|
+  | Read-only | CC-Viewers | see everything, change nothing |
+  | Helpdesk | CC-Helpdesk | refresh, message, view a screen (the agent is told), start Genesys, reconnect, collect logs, re-apply desktop/policies |
+  | Admin | CC-Admins | also log users off, sign out laptops, restart services, reboot, move rings, publish, promote, roll back |
+  Every refused attempt is written to the audit log as *denied*. IT staff's own desktop sessions get the same policies and the same
+  no-clipboard/no-drives rules as agents.
+- **Two-person rule**: the admin who published a catalog or policy version cannot promote it to every device; a second admin must check
+  and promote it (`console_four_eyes`). Rollback stays one click for any admin, so a bad change can be undone at once.
+- **Idle sign-out** after 30 minutes without activity (`console_idle_minutes`), and at most 8 hours per sign-in.
+- Admin sign-in is checked against AD (Kerberos) and those groups. The session is an
   HttpOnly, SameSite=Strict cookie, every change needs a CSRF header, and 5 failed sign-ins from an
   address lock it out for 5 minutes.
 - Linux machines authenticate with an enrollment token. Laptops authenticate with the agent's own
@@ -93,6 +104,8 @@ Ansible.
 - only allow-listed actions run
 - log off works
 - pilot → promote → rollback changes exactly the right hosts
+- viewers can only read, helpdesk cannot reboot, log off or change configuration, and refusals are audited
+- the admin who published a version cannot promote it; a second admin can
 
 `tests/test_14_policies.py` checks the policies:
 - bad input is refused (host names instead of IPs, bad ports, allow-only with no rules, bad URL patterns), and the CSRF header is required

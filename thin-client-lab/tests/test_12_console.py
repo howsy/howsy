@@ -42,12 +42,22 @@ class Console:
         return cmd, img
 
 
+def signed_in(cfg, who):
+    con = Console(cfg["console"]["url"])
+    a = cfg["console"][who]
+    assert con.login(a["username"], a["password"]).status_code == 200, who
+    return con
+
+
 @pytest.fixture(scope="module")
 def c(cfg):
-    con = Console(cfg["console"]["url"])
-    a = cfg["console"]["admin"]
-    assert con.login(a["username"], a["password"]).status_code == 200
-    return con
+    return signed_in(cfg, "admin")
+
+
+@pytest.fixture(scope="module")
+def c2(cfg):
+    """A second admin, for the two-person rule."""
+    return signed_in(cfg, "admin2")
 
 
 def test_console_and_agent_running(lab, cfg):
@@ -56,10 +66,10 @@ def test_console_and_agent_running(lab, cfg):
         assert h.service(svc).is_running and h.service(svc).is_enabled
 
 
-def test_only_ad_admins_can_sign_in(cfg):
+def test_only_ad_it_staff_can_sign_in(cfg):
     con = Console(cfg["console"]["url"])
     agent = cfg["users"]["agent"]
-    assert con.login(agent["username"], agent["password"]).status_code == 403, "agent is not in CC-Admins"
+    assert con.login(agent["username"], agent["password"]).status_code == 403, "agent is in no IT group"
     assert con.login(cfg["console"]["admin"]["username"], "wrong-password").status_code == 403
     assert requests.get(cfg["console"]["url"] + "/api/devices", timeout=10).status_code == 401
 
@@ -166,7 +176,7 @@ def test_log_user_off(lab, cfg, c, agent_on_laptop):
 
 
 @pytest.mark.slow
-def test_catalog_rings_promote_and_rollback(lab, cfg, c):
+def test_catalog_rings_promote_and_rollback(lab, cfg, c, c2):
     pilot, broad = cfg["session_hosts"][0], cfg["session_hosts"][1]
     cat = c.get("/api/catalog")
     start = cat["rings"]["broad"]
@@ -180,7 +190,7 @@ def test_catalog_rings_promote_and_rollback(lab, cfg, c):
         wait_for(lambda: has(pilot), 45, what="new icon on the pilot host")
         time.sleep(20)
         assert not has(broad), "broad ring changed before promotion"
-        c.post("/api/catalog/promote")
+        c2.post("/api/catalog/promote")                 # a second admin promotes
         wait_for(lambda: has(broad), 45, what="new icon on the broad host after promotion")
         policy = lab.host(broad).file("/etc/opt/chrome/policies/managed/cc-desktop.json").content_string
         assert "Test Wallboard" in policy
@@ -188,3 +198,40 @@ def test_catalog_rings_promote_and_rollback(lab, cfg, c):
         c.post("/api/catalog/rollback", {"version": start})
         c.post(f"/api/devices/{pilot}/ring", {"ring": "broad"})
     wait_for(lambda: not has(pilot) and not has(broad), 45, what="rollback on every host")
+
+
+def test_it_roles_are_enforced_by_the_server(cfg, c):
+    """Viewers only read; helpdesk does support actions but not reboots, log-offs
+    or configuration; every refusal is audited."""
+    viewer, helpdesk = signed_in(cfg, "viewer"), signed_in(cfg, "helpdesk")
+    host = cfg["session_hosts"][0]
+    assert viewer.get("/api/me")["role"] == "viewer" and helpdesk.get("/api/me")["role"] == "helpdesk"
+    assert any(d["id"] == host for d in viewer.get("/api/devices")), "viewers can read"
+
+    def act(con, action, **args):
+        return con.s.post(f"{con.url}/api/devices/{host}/actions", json={"action": action, "args": args}, timeout=10).status_code
+    assert act(viewer, "refresh") == 403
+    assert act(helpdesk, "refresh") == 200
+    assert act(helpdesk, "reboot") == 403
+    assert act(helpdesk, "logoff_user", user="nobody") == 403
+    for con in (viewer, helpdesk):
+        assert con.s.post(f"{con.url}/api/policy", json={}, timeout=10).status_code == 403
+        assert con.s.post(f"{con.url}/api/catalog/rollback", json={"version": 1}, timeout=10).status_code == 403
+        assert con.s.post(f"{con.url}/api/devices/{host}/ring", json={"ring": "pilot"}, timeout=10).status_code == 403
+    assert "reboot" not in helpdesk.get(f"/api/devices/{host}")["actions"], "UI only offers allowed actions"
+    assert viewer.get(f"/api/devices/{host}")["actions"] == {}
+    denied = [a for a in c.get("/api/audit") if a["action"] == "denied"]
+    assert any(a["admin"] == cfg["console"]["helpdesk"]["username"] for a in denied), "refusals audited"
+
+
+def test_two_person_rule_for_promotion(cfg, c, c2):
+    cat = c.get("/api/catalog")
+    start = cat["rings"]["broad"]
+    items = next(v for v in cat["versions"] if v["version"] == start)["items"]
+    try:
+        c.post("/api/catalog", {"items": items, "note": "two-person test"})
+        r = c.s.post(f"{c.url}/api/catalog/promote", json={}, timeout=10)
+        assert r.status_code == 403 and "second admin" in r.json()["error"]
+        assert c2.post("/api/catalog/promote")["version"] > start
+    finally:
+        c.post("/api/catalog/rollback", {"version": start})
