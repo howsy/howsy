@@ -7,28 +7,66 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Icon sprite: <svg class="i"><use href="#i-name"/></svg> -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-logo" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></symbol>
+      <symbol id="i-overview" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+      <symbol id="i-devices" viewBox="0 0 24 24"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="18" y="8" width="4" height="12" rx="1"/></symbol>
+      <symbol id="i-sessions" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></symbol>
+      <symbol id="i-apps" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><path d="M17.5 14v7M14 17.5h7"/></symbol>
+      <symbol id="i-policy" viewBox="0 0 24 24"><path d="M12 2.5 4 5.5v6c0 5 3.4 8.8 8 10 4.6-1.2 8-5 8-10v-6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol>
+      <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.5v.5"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-msg" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+      <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8M6.5 6.5a8 8 0 1 0 11 0"/></symbol>
+      <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+      <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+      <symbol id="i-wall" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9.5h18M3 14.5h18M9 4v5.5M15 9.5v5M9 14.5V20"/></symbol>
+      <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2M9 15l-3-3c1-4 4.5-8.5 13-9-.5 8.5-5 12-9 13z"/><circle cx="14.5" cy="9.5" r="1.5"/></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24"><path d="M4 9h11a5 5 0 0 1 0 10H8"/><path d="M8 5 4 9l4 4"/></symbol>
+    </defs>
+  </svg>
+
   <div id="login" class="login hidden">
     <form id="login-form" class="login-card">
-      <div class="brand big">☎ Call Center Console</div>
-      <p class="muted">Sign in with your AD account (members of CC-Admins).</p>
+      <div class="brand-mark big"><svg class="i"><use href="#i-logo"/></svg></div>
+      <div>
+        <h1>Call Center Console</h1>
+        <p class="muted">Sign in with your AD account. Members of CC-Admins only.</p>
+      </div>
       <label>Username <input name="username" autocomplete="username" required placeholder="itadmin1"></label>
       <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-      <button class="primary" type="submit">Sign in</button>
+      <button class="primary wide" type="submit">Sign in</button>
       <p id="login-error" class="error"></p>
     </form>
   </div>
 
   <div id="app" class="app hidden">
     <aside class="nav">
-      <div class="brand">☎ CC Console</div>
-      <a href="#/overview" data-page="overview">Overview</a>
-      <a href="#/devices" data-page="devices">Devices</a>
-      <a href="#/sessions" data-page="sessions">Sessions</a>
-      <a href="#/apps" data-page="apps">Apps &amp; desktop</a>
-      <a href="#/activity" data-page="activity">Activity</a>
+      <div class="brand"><span class="brand-mark"><svg class="i"><use href="#i-logo"/></svg></span>
+        <span><b>CC Console</b><small>Fleet management</small></span></div>
+      <nav>
+        <div class="nav-label">Monitor</div>
+        <a href="#/overview" data-page="overview"><svg class="i"><use href="#i-overview"/></svg>Overview</a>
+        <a href="#/devices" data-page="devices"><svg class="i"><use href="#i-devices"/></svg>Devices</a>
+        <a href="#/sessions" data-page="sessions"><svg class="i"><use href="#i-sessions"/></svg>Sessions</a>
+        <div class="nav-label">Configure</div>
+        <a href="#/apps" data-page="apps"><svg class="i"><use href="#i-apps"/></svg>Apps &amp; desktop</a>
+        <a href="#/policies" data-page="policies"><svg class="i"><use href="#i-policy"/></svg>Policies</a>
+        <div class="nav-label">Audit</div>
+        <a href="#/activity" data-page="activity"><svg class="i"><use href="#i-activity"/></svg>Activity</a>
+      </nav>
       <div class="nav-foot">
-        <span id="me" class="muted"></span>
-        <button id="logout" class="link">Sign out</button>
+        <span class="avatar" id="avatar"></span>
+        <span class="who"><b id="me"></b><small>CC-Admins</small></span>
+        <button id="logout" class="icon-btn" title="Sign out"><svg class="i"><use href="#i-logout"/></svg></button>
       </div>
     </aside>
     <main id="main"></main>
@@ -36,7 +74,8 @@
 
   <div id="modal" class="modal hidden">
     <div class="modal-card">
-      <div class="modal-head"><h3 id="modal-title"></h3><button id="modal-close" class="link">Close ✕</button></div>
+      <div class="modal-head"><h3 id="modal-title"></h3>
+        <button id="modal-close" class="icon-btn" title="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
       <div id="modal-body"></div>
     </div>
   </div>

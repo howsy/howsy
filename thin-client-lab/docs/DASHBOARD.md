@@ -20,6 +20,9 @@ it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. S
 | **Sessions**: every agent desktop on the farm, the laptop it is viewed from, Genesys running or not, CPU/RAM per agent; Watch, Message, Log off | Sessions | VDI session monitoring |
 | **Apps & desktop**: the list of web systems on the agent desktop (one icon, one browser tab and one bookmark each); edit it in the browser, publish, and the session hosts update within ~15 s, including desktops already open | Apps & desktop | Intune app assignment |
 | **Rings**: a published catalog goes to the *pilot* ring first; *Promote* sends it to *broad*. Every version is kept and can be rolled back with one click. | Apps & desktop | Intune update rings, SteamOS beta channel and A/B rollback |
+| **Browser URL rules**: block listed sites (on top of the base lock-down) with exceptions, or *allow only* listed sites. In allow-only mode the desktop catalog's systems and Genesys are always allowed, so the agent desktop keeps working. Applies to Chrome on session hosts and Linux endpoints. | Policies | Intune / Chrome Enterprise URL blocklist |
+| **Outbound firewall**: off, or *allow only* listed destinations (IP/CIDR, TCP/UDP, ports) for the agents' own apps. Root and system services (sign-in, home folders, updates, the console) are never filtered, so a wrong rule cannot cut a device off. | Policies | Intune firewall rules, Defender network protection |
+| **Policy rings**: policies are versioned and go pilot → broad with rollback, exactly like the catalog. Each device reports the version it applied, and a failure raises an alert. | Policies | Intune update rings |
 | **Capacity**: CPU history per session host, desktops per host, alerts at high CPU/RAM | Overview | — |
 | **Alerts**: offline servers (critical), offline devices, not-compliant devices, overloaded hosts | Overview | — |
 | **Audit log** of every sign-in, action, screen view, publish, promote and rollback | Activity → Admin audit log | Intune audit logs |
@@ -55,6 +58,11 @@ it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. S
   internet needed).
 - `services/cc-device-agent.py` runs on Linux machines. On session hosts it also applies the catalog
   for its ring with `cc-desktop-render`.
+- Policies on session hosts and endpoints: URL rules go into an extra Chrome managed-policy file,
+  `cc-urls.json`. Chrome applies the file that sorts last when two files set the same policy, so this
+  one carries the base `URLBlocklist` from `cc-policy.json` plus the console's rules. The firewall is
+  an nftables table, `inet cc_policy`, that only matches sockets owned by uid ≥ 1000 (agents). The last
+  policy is kept in `/etc/cc-console/policy.json` and re-applied at boot.
 - `services/cc-laptop-agent.py` (the lab's stand-in laptop) and `windows/CC-Shell.ps1` (real laptops)
   report as role *laptop*.
 - Ansible roles: `console` (on brokers) and `device_agent` (everywhere else).
@@ -83,3 +91,11 @@ Ansible.
 - only allow-listed actions run
 - log off works
 - pilot → promote → rollback changes exactly the right hosts
+
+`tests/test_14_policies.py` checks the policies:
+- bad input is refused (host names instead of IPs, bad ports, allow-only with no rules, bad URL patterns), and the CSRF header is required
+- session hosts and endpoints report the policy version they applied
+- a URL rule and an allow-only firewall reach the pilot host first. The agent user is blocked from
+  LDAP but can still reach the allowed CRM. Root and SSSD keep working. The broad host changes only
+  after Promote, and rollback removes the firewall everywhere.
+- allow-only URLs keep every catalog system and Genesys allowed

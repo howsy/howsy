@@ -6,6 +6,9 @@ Every 15 s: health (CPU, RAM, disk), compliance checks for its role, agent
 sessions (session hosts), events. In between it waits on the console for
 commands, so actions arrive within a second. Session hosts also receive the
 desktop catalog for their ring and re-render the icons and browser tabs.
+Session hosts and endpoints receive the policies for their ring: browser URL
+rules (an extra Chrome managed-policy file) and an outbound firewall for agent
+users' traffic (nftables; root and system services are never filtered).
 """
 import base64
 import json
@@ -21,8 +24,17 @@ import urllib.request
 CONF = json.load(open(os.environ.get("CC_AGENT_CONF", "/etc/cc-console/agent.json")))
 ROLE = CONF["role"]
 DEVICE = CONF.get("device") or socket.gethostname().lower()
-VERSION = "1.0"
+VERSION = "1.1"
 CATALOG = "/etc/cc-desktop/catalog.json"
+POLICY_ROLES = ("session_host", "endpoint")
+POLICY = "/etc/cc-console/policy.json"           # last policy received, re-applied at boot
+NFT_RULES = "/etc/cc-console/cc-policy.nft"
+CHROME_DIR = "/etc/opt/chrome/policies/managed"
+# Chrome reads every file in CHROME_DIR; for a policy set in two files the file
+# that sorts last wins. cc-urls.json sorts after cc-policy.json (Ansible's base
+# lock-down), so it carries the base URLBlocklist plus the console's rules.
+CHROME_BASE = f"{CHROME_DIR}/cc-policy.json"
+CHROME_URLS = f"{CHROME_DIR}/cc-urls.json"
 
 
 def ad_domain():
@@ -41,6 +53,8 @@ DOMAIN = ad_domain()
 events, events_lock = [], threading.Lock()
 checkin_now = threading.Event()
 _cache = {}
+policy_state = {}                                # what was applied, reported in facts
+policy_lock = threading.Lock()
 
 
 def event(kind, message, user=None):
@@ -152,6 +166,9 @@ def compliance():
         else:
             crypt = "crypt" in sh("lsblk -n -o TYPE").stdout.split()
             c["disk_encryption"] = check(crypt, "disk encrypted" if crypt else "disk not encrypted")
+    if ROLE in POLICY_ROLES and policy_state:
+        err = policy_state.get("error")
+        c["policies"] = check(not err, err or f"policies v{policy_state['version']} applied")
     return c
 
 
@@ -185,6 +202,7 @@ def facts():
         "metrics": {"cpu": cpu_percent() or 0.0, "mem_pct": mem_pct, "load": round(os.getloadavg()[0], 2),
                     "disk_pct": round(100 * (1 - st.f_bavail / st.f_blocks), 1)},
         "simulated": is_container(),
+        **({"policy": policy_state} if ROLE in POLICY_ROLES and policy_state else {}),
     }
 
 
@@ -204,6 +222,104 @@ def apply_catalog(cat, force=False):
     for s in user_sessions():                     # refresh icons on desktops already open
         run_as_user(s["user"], "/usr/local/bin/cc-desktop-setup")
     event("desktop", f"desktop catalog v{cat['version']} applied ({len(cat['items'])} systems)")
+    saved = load_json(POLICY)
+    if saved and saved["policy"]["url_mode"] == "allow_only":
+        apply_policy(saved, force=True)           # the allow-list includes the catalog's systems
+
+
+# ---- policies: browser URL rules and outbound firewall ------------------------
+def load_json(path):
+    try:
+        return json.load(open(path))
+    except (OSError, ValueError):
+        return None
+
+
+def write_if_changed(path, text, mode=0o644):
+    try:
+        if open(path).read() == text:
+            return
+    except OSError:
+        pass
+    with open(path + ".tmp", "w") as f:
+        f.write(text)
+    os.chmod(path + ".tmp", mode)
+    os.replace(path + ".tmp", path)
+
+
+def chrome_url_policy(pol):
+    """URLBlocklist/URLAllowlist for cc-urls.json. allow_only blocks everything
+    except the listed sites, the desktop's own systems and Genesys."""
+    base = load_json(CHROME_BASE) or {}
+    if pol["url_mode"] == "allow_only":
+        catalog = [it["url"] for it in (load_json(CATALOG) or {}).get("items", [])]
+        genesys = [p.replace("[*.]", "") for p in base.get("AudioCaptureAllowedUrls", [])]
+        block = ["*"]
+        allow = pol["url_allow"] + catalog + genesys + ["chrome://newtab", "about:blank"]
+    else:
+        block = base.get("URLBlocklist", []) + pol["url_block"]
+        allow = pol["url_allow"]
+    return {"URLBlocklist": list(dict.fromkeys(block)), "URLAllowlist": list(dict.fromkeys(allow))}
+
+
+def nft_ruleset(pol):
+    """Outbound allow-list for sockets owned by agent users (uid >= 1000, not
+    nobody). Root, system services and kernel traffic (NFS, sssd) are untouched,
+    so a bad rule can cut off an agent's apps but never the machine itself."""
+    out = ["table inet cc_policy", "delete table inet cc_policy"]   # idempotent replace
+    if pol["egress_mode"] != "allow_only":
+        return "\n".join(out) + "\n"
+    out += ["table inet cc_policy {",
+            "  chain output {",
+            "    type filter hook output priority 0; policy accept;",
+            "    meta skuid >= 1000 meta skuid != 65534 jump agent",
+            "  }",
+            "  chain agent {",
+            '    oif "lo" accept',
+            "    ct state established,related accept"]
+    for r in pol["egress_allow"]:
+        fam = "ip6" if ":" in r["dest"] else "ip"
+        match = f"{r['proto']} dport {{ {r['ports'].replace(',', ', ')} }}" if r["ports"] else f"meta l4proto {r['proto']}"
+        name = re.sub(r"[^A-Za-z0-9 ._-]", "", r.get("name") or "")[:60]
+        out.append(f'    {fam} daddr {r["dest"]} {match} accept comment "{name or r["dest"]}"')
+    out += ['    limit rate 10/minute log prefix "cc-policy blocked: "',
+            "    meta l4proto tcp reject with tcp reset",
+            "    reject",
+            "  }",
+            "}"]
+    return "\n".join(out) + "\n"
+
+
+def apply_policy(entry, force=False):
+    """entry = {"version": n, "policy": {...}} from the console."""
+    global policy_state
+    pol = entry["policy"]
+    with policy_lock:
+        if not force and policy_state.get("version") == entry["version"] and not policy_state.get("error"):
+            return
+        errors = []
+        if os.path.isdir(CHROME_DIR):
+            try:
+                write_if_changed(CHROME_URLS, json.dumps(chrome_url_policy(pol), indent=4, sort_keys=True) + "\n")
+            except OSError as e:
+                errors.append(f"browser: {e}")
+        rules = nft_ruleset(pol)
+        if pol["egress_mode"] == "allow_only" or os.path.exists(NFT_RULES):
+            write_if_changed(NFT_RULES, rules, 0o600)
+            r = sh(["nft", "-f", NFT_RULES])
+            if r.returncode != 0:
+                errors.append("firewall: " + (r.stderr or r.stdout or "nft failed").strip()[-300:])
+        os.makedirs(os.path.dirname(POLICY), exist_ok=True)
+        write_if_changed(POLICY, json.dumps(entry, indent=2) + "\n", 0o600)
+        changed = policy_state.get("version") != entry["version"]
+        policy_state = {"version": entry["version"], "url_mode": pol["url_mode"],
+                        "url_rules": len(pol["url_block"]) + len(pol["url_allow"]),
+                        "egress_mode": pol["egress_mode"], "egress_rules": len(pol["egress_allow"]),
+                        "applied_at": time.time(), "error": "; ".join(errors) or None}
+    if errors:
+        event("policy", f"policies v{entry['version']} NOT applied: {policy_state['error']}")
+    elif changed or force:
+        event("policy", f"policies v{entry['version']} applied (URLs: {pol['url_mode']}, firewall: {pol['egress_mode']})")
 
 
 # ---- acting inside an agent's desktop session --------------------------------
@@ -287,6 +403,12 @@ def do(action, args):
         if cat:
             apply_catalog(cat, force=True)
         return True, "desktop re-applied", None
+    if action == "apply_policy":
+        pol = api("/agent/checkin", payload(), timeout=30).get("policy")
+        if not pol:
+            return False, "no policy for this device", None
+        apply_policy(pol, force=True)
+        return not policy_state.get("error"), policy_state.get("error") or f"policies v{pol['version']} applied", None
     if action == "reboot":
         event("power", "reboot requested by an administrator")
         threading.Timer(3, lambda: sh(["systemctl", "reboot"])).start()
@@ -332,6 +454,8 @@ def checkin_loop():
                 threading.Thread(target=run_command, args=(cmd,), daemon=True).start()
             if ROLE == "session_host" and reply.get("catalog"):
                 apply_catalog(reply["catalog"])
+            if ROLE in POLICY_ROLES and reply.get("policy"):
+                apply_policy(reply["policy"])
         except Exception as e:
             print(f"check-in failed: {e}", flush=True)
         checkin_now.wait(15)
@@ -350,5 +474,7 @@ def wait_loop():
 
 if __name__ == "__main__":
     event("agent", f"agent {VERSION} started")
+    if ROLE in POLICY_ROLES and load_json(POLICY):
+        apply_policy(load_json(POLICY), force=True)   # firewall rules do not survive a reboot
     threading.Thread(target=wait_loop, daemon=True).start()
     checkin_loop()

@@ -5,6 +5,12 @@
     install_recommends: false
   when: cc_device_role == 'session_host'
 
+- name: nftables for the console's outbound firewall policy
+  ansible.builtin.apt:
+    name: nftables
+    install_recommends: false
+  when: cc_device_role in ['session_host', 'endpoint']
+
 - name: Config directory
   ansible.builtin.file:
     path: /etc/cc-console

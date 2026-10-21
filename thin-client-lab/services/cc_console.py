@@ -11,6 +11,8 @@ with their AD account (members of the admin group only) and get:
   sessions   who works where, CPU/RAM per agent, watch / message / log off
   apps       the catalog of web systems on the agent desktop, versions and
              rollback, published by ring (pilot first, then broad)
+  policies   browser URL rules and the outbound firewall for agent users on
+             session hosts and endpoints, published by ring the same way
   activity   device timeline and the admins' audit log
 
 Device auth: a shared enrollment token (Linux agents, root) or Kerberos (the
@@ -21,10 +23,12 @@ import base64
 import collections
 import grp
 import hmac
+import ipaddress
 import json
 import logging
 import os
 import pwd
+import re
 import secrets
 import sqlite3
 import ssl
@@ -57,9 +61,17 @@ ACTIONS = {
     "restart_service":   {"roles": ["session_host", "broker"], "label": "Restart service", "args": ["service"],
                           "confirm": True},
     "apply_catalog":     {"roles": ["session_host"], "label": "Re-apply desktop"},
+    "apply_policy":      {"roles": ["session_host", "endpoint"], "label": "Re-apply policies"},
     "reboot":            {"roles": ["session_host", "broker", "endpoint"], "label": "Reboot", "confirm": True},
 }
 RINGS = ["pilot", "broad"]
+POLICY_ROLES = ("session_host", "endpoint")
+EMPTY_POLICY = {"url_mode": "block_listed", "url_block": [], "url_allow": [],
+                "egress_mode": "off", "egress_allow": []}
+# Things published by ring: table of versions, table of ring -> version, content column.
+VERSIONED = {"catalog": ("catalog_versions", "rings", "items"),
+             "policy": ("policy_versions", "policy_rings", "policy")}
+URL_PATTERN = re.compile(r"^[A-Za-z0-9*.\-:/_\[\]?=&%#~+@]{1,300}$")
 
 log = logging.getLogger("cc-console")
 lock = threading.RLock()
@@ -86,17 +98,22 @@ def init_db():
         CREATE TABLE IF NOT EXISTS catalog_versions (version INTEGER PRIMARY KEY, created_at REAL,
             created_by TEXT, note TEXT, items TEXT);
         CREATE TABLE IF NOT EXISTS rings (ring TEXT PRIMARY KEY, version INTEGER);
+        CREATE TABLE IF NOT EXISTS policy_versions (version INTEGER PRIMARY KEY, created_at REAL,
+            created_by TEXT, note TEXT, policy TEXT);
+        CREATE TABLE IF NOT EXISTS policy_rings (ring TEXT PRIMARY KEY, version INTEGER);
         CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, ts REAL, admin TEXT, action TEXT,
             target TEXT, detail TEXT);
         CREATE INDEX IF NOT EXISTS events_device ON events(device, ts);
         """)
-        if not db.execute("SELECT 1 FROM catalog_versions").fetchone():
-            seed = CONF.get("seed_catalog")
-            items = json.load(open(seed)) if seed and os.path.exists(seed) else []
-            db.execute("INSERT INTO catalog_versions VALUES (1, ?, 'setup', 'initial catalog', ?)",
-                       (time.time(), json.dumps(items)))
-            for ring in RINGS:
-                db.execute("INSERT OR REPLACE INTO rings VALUES (?, 1)", (ring,))
+        seed = CONF.get("seed_catalog")
+        seeds = {"catalog": ("initial catalog", json.load(open(seed)) if seed and os.path.exists(seed) else []),
+                 "policy": ("no extra rules", EMPTY_POLICY)}
+        for kind, (versions, rings, col) in VERSIONED.items():
+            if not db.execute(f"SELECT 1 FROM {versions}").fetchone():
+                note, content = seeds[kind]
+                db.execute(f"INSERT INTO {versions} VALUES (1, ?, 'setup', ?, ?)", (time.time(), note, json.dumps(content)))
+                for ring in RINGS:
+                    db.execute(f"INSERT OR REPLACE INTO {rings} VALUES (?, 1)", (ring,))
         db.commit()
 
 
@@ -114,11 +131,104 @@ def audit(admin, action, target, detail=""):
         db.commit()
 
 
-def ring_catalog(ring):
+def ring_content(kind, ring):
+    """{"version": n, <content column>: ...} that devices in this ring should have."""
+    versions, rings, col = VERSIONED[kind]
     with lock:
-        row = db.execute("SELECT v.version, v.items FROM rings r JOIN catalog_versions v ON v.version = r.version "
+        row = db.execute(f"SELECT v.version, v.{col} FROM {rings} r JOIN {versions} v ON v.version = r.version "
                          "WHERE r.ring = ?", (ring,)).fetchone()
-    return {"version": row["version"], "items": json.loads(row["items"])} if row else None
+    return {"version": row["version"], col: json.loads(row[col])} if row else None
+
+
+def ring_catalog(ring):
+    return ring_content("catalog", ring)
+
+
+def ring_versions(kind):
+    versions, rings, col = VERSIONED[kind]
+    with lock:
+        vs = [dict(r, **{col: json.loads(r[col])}) for r in
+              db.execute(f"SELECT * FROM {versions} ORDER BY version DESC LIMIT 30")]
+        rs = {r["ring"]: r["version"] for r in db.execute(f"SELECT * FROM {rings}")}
+    return {"versions": vs, "rings": rs}
+
+
+def publish_version(kind, user, content, note):
+    """New version, live on the pilot ring only."""
+    versions, rings, _ = VERSIONED[kind]
+    with lock:
+        v = (db.execute(f"SELECT MAX(version) FROM {versions}").fetchone()[0] or 0) + 1
+        db.execute(f"INSERT INTO {versions} VALUES (?,?,?,?,?)",
+                   (v, time.time(), user, str(note or "")[:200], json.dumps(content)))
+        db.execute(f"UPDATE {rings} SET version=? WHERE ring='pilot'", (v,))
+        db.commit()
+    return v
+
+
+def promote_version(kind):
+    _, rings, _ = VERSIONED[kind]
+    with lock:
+        v = db.execute(f"SELECT version FROM {rings} WHERE ring='pilot'").fetchone()["version"]
+        db.execute(f"UPDATE {rings} SET version=? WHERE ring='broad'", (v,))
+        db.commit()
+    return v
+
+
+def rollback_version(kind, v, ring):
+    versions, rings, _ = VERSIONED[kind]
+    if ring not in RINGS + ["all"]:
+        raise ValueError("unknown ring")
+    with lock:
+        if not db.execute(f"SELECT 1 FROM {versions} WHERE version=?", (v,)).fetchone():
+            raise ValueError("unknown version")
+        for r in (RINGS if ring == "all" else [ring]):
+            db.execute(f"UPDATE {rings} SET version=? WHERE ring=?", (v, r))
+        db.commit()
+
+
+def clean_ports(text):
+    """'' (any port) or '80,443,8000-8100' -> normalised string; ValueError if bad."""
+    text = str(text or "").replace(" ", "")
+    if not text:
+        return ""
+    for part in text.split(","):
+        lo, _, hi = part.partition("-")
+        nums = [int(lo)] + ([int(hi)] if hi else [])
+        if not all(1 <= n <= 65535 for n in nums) or (hi and nums[1] < nums[0]):
+            raise ValueError(f"bad port {part!r}")
+    return text
+
+
+def clean_policy(req):
+    """Validate an admin's policy; devices get exactly this, nothing free-form."""
+    url_mode = req.get("url_mode", "block_listed")
+    egress_mode = req.get("egress_mode", "off")
+    if url_mode not in ("block_listed", "allow_only"):
+        raise ValueError("url_mode must be block_listed or allow_only")
+    if egress_mode not in ("off", "allow_only"):
+        raise ValueError("egress_mode must be off or allow_only")
+    lists = {}
+    for key in ("url_block", "url_allow"):
+        vals = [str(u).strip() for u in req.get(key, []) if str(u).strip()]
+        bad = [u for u in vals if not URL_PATTERN.match(u)]
+        if bad:
+            raise ValueError(f"not a URL pattern: {bad[0]!r}")
+        lists[key] = list(dict.fromkeys(vals))[:500]
+    rules = []
+    for r in req.get("egress_allow", [])[:200]:
+        dest = str(r.get("dest", "")).strip()
+        try:
+            dest = str(ipaddress.ip_network(dest, strict=False))
+        except ValueError:
+            raise ValueError(f"destination must be an IP address or network (CIDR): {dest!r}") from None
+        proto = r.get("proto", "tcp")
+        if proto not in ("tcp", "udp"):
+            raise ValueError("protocol must be tcp or udp")
+        rules.append({"name": str(r.get("name", "")).strip()[:60], "dest": dest, "proto": proto,
+                      "ports": clean_ports(r.get("ports", ""))})
+    if egress_mode == "allow_only" and not rules:
+        raise ValueError("allow-only firewall needs at least one allowed destination")
+    return {"url_mode": url_mode, **lists, "egress_mode": egress_mode, "egress_allow": rules}
 
 
 def compliance_state(comp):
@@ -166,6 +276,9 @@ def alerts(devices):
         if d["compliance_state"] == "noncompliant":
             bad = [k for k, c in d["compliance"].items() if c.get("ok") is False and c.get("severity", "fail") == "fail"]
             out.append({"level": "warning", "device": d["id"], "text": "not compliant: " + ", ".join(bad)})
+        pol = d["facts"].get("policy") or {}
+        if pol.get("error"):
+            out.append({"level": "warning", "device": d["id"], "text": f"policies v{pol.get('version')} not applied: {pol['error']}"})
         m = d["facts"].get("metrics", {})
         if d["role"] == "session_host" and m.get("cpu", 0) > 85:
             out.append({"level": "warning", "device": d["id"], "text": f"CPU {m['cpu']:.0f}%"})
@@ -317,7 +430,9 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/events":
             return self.api_events(q)
         if p == "/api/catalog":
-            return self.api_catalog()
+            return self.send(200, ring_versions("catalog"))
+        if p == "/api/policy":
+            return self.api_policy()
         if p == "/api/audit":
             with lock:
                 rows = [dict(r) for r in db.execute("SELECT * FROM audit ORDER BY id DESC LIMIT 200")]
@@ -352,6 +467,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self.api_promote(user)
             if p == "/api/catalog/rollback":
                 return self.api_rollback(user)
+            if p == "/api/policy":
+                return self.api_policy_publish(user)
+            if p == "/api/policy/promote":
+                v = promote_version("policy")
+                audit(user, "promoted policies", f"v{v}", "pilot -> broad")
+                return self.send(200, {"version": v})
+            if p == "/api/policy/rollback":
+                req = self.body()
+                v, ring = int(req["version"]), req.get("ring", "all")
+                rollback_version("policy", v, ring)
+                audit(user, "rolled back policies", f"v{v}", f"ring {ring}")
+                return self.send(200, {"version": v})
             self.send(404, {"error": "not found"})
         except (ValueError, KeyError, json.JSONDecodeError) as e:
             self.send(400, {"error": str(e)})
@@ -428,6 +555,8 @@ class Handler(BaseHTTPRequestHandler):
         reply = {"ring": ring, "commands": self.take_commands(dev)}
         if role == "session_host":
             reply["catalog"] = ring_catalog(ring)
+        if role in POLICY_ROLES:
+            reply["policy"] = ring_content("policy", ring)
         self.send(200, reply)
 
     def take_commands(self, dev):
@@ -486,6 +615,7 @@ class Handler(BaseHTTPRequestHandler):
             "laptops_online": sum(d["online"] for d in devs if d["role"] == "laptop"),
             "alerts": alerts(devs), "capacity": capacity,
             "catalog": {r: (ring_catalog(r) or {}).get("version") for r in RINGS},
+            "policy": {r: (ring_content("policy", r) or {}).get("version") for r in RINGS},
         })
 
     def api_device(self, dev):
@@ -560,13 +690,6 @@ class Handler(BaseHTTPRequestHandler):
             rows = [dict(r) for r in db.execute(sql + " ORDER BY ts DESC LIMIT ?", params + [limit])]
         self.send(200, rows)
 
-    def api_catalog(self):
-        with lock:
-            versions = [dict(r, items=json.loads(r["items"])) for r in
-                        db.execute("SELECT * FROM catalog_versions ORDER BY version DESC LIMIT 30")]
-            rings = {r["ring"]: r["version"] for r in db.execute("SELECT * FROM rings")}
-        self.send(200, {"versions": versions, "rings": rings})
-
     def api_publish(self, user):
         req = self.body()
         items = []
@@ -575,34 +698,36 @@ class Handler(BaseHTTPRequestHandler):
             if not name or not url.startswith(("http://", "https://")):
                 raise ValueError(f"each system needs a name and an http(s) URL ({name or url!r})")
             items.append({"name": name[:60], "url": url[:500], "icon": str(it.get("icon") or "applications-internet")[:60]})
-        with lock:
-            v = (db.execute("SELECT MAX(version) FROM catalog_versions").fetchone()[0] or 0) + 1
-            db.execute("INSERT INTO catalog_versions VALUES (?,?,?,?,?)",
-                       (v, time.time(), user, str(req.get("note", ""))[:200], json.dumps(items)))
-            db.execute("UPDATE rings SET version=? WHERE ring='pilot'", (v,))
-            db.commit()
+        v = publish_version("catalog", user, items, req.get("note"))
         audit(user, "published catalog", f"v{v}", f"{len(items)} systems, to pilot ring")
         self.send(200, {"version": v, "ring": "pilot"})
 
     def api_promote(self, user):
-        with lock:
-            v = db.execute("SELECT version FROM rings WHERE ring='pilot'").fetchone()["version"]
-            db.execute("UPDATE rings SET version=? WHERE ring='broad'", (v,))
-            db.commit()
+        v = promote_version("catalog")
         audit(user, "promoted catalog", f"v{v}", "pilot -> broad")
         self.send(200, {"version": v})
 
     def api_rollback(self, user):
         req = self.body()
         v, ring = int(req["version"]), req.get("ring", "all")
-        with lock:
-            if not db.execute("SELECT 1 FROM catalog_versions WHERE version=?", (v,)).fetchone():
-                raise ValueError("unknown version")
-            for r in (RINGS if ring == "all" else [ring]):
-                db.execute("UPDATE rings SET version=? WHERE ring=?", (v, r))
-            db.commit()
+        rollback_version("catalog", v, ring)
         audit(user, "rolled back catalog", f"v{v}", f"ring {ring}")
         self.send(200, {"version": v})
+
+    def api_policy(self):
+        out = ring_versions("policy")
+        out["devices"] = [{"id": d["id"], "role": d["role"], "ring": d["ring"], "online": d["online"],
+                           "applied": d["facts"].get("policy")} for d in all_devices() if d["role"] in POLICY_ROLES]
+        self.send(200, out)
+
+    def api_policy_publish(self, user):
+        req = self.body()
+        pol = clean_policy(req)
+        v = publish_version("policy", user, pol, req.get("note"))
+        audit(user, "published policies", f"v{v}",
+              f"URLs {pol['url_mode']} ({len(pol['url_block'])} blocked, {len(pol['url_allow'])} allowed); "
+              f"firewall {pol['egress_mode']} ({len(pol['egress_allow'])} rules); to pilot ring")
+        self.send(200, {"version": v, "ring": "pilot"})
 
     def api_set_ring(self, user, dev):
         ring = self.body().get("ring")
