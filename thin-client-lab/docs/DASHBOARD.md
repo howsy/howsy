@@ -22,6 +22,8 @@ it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. S
 | **Rings**: a published catalog goes to the *pilot* ring first; *Promote* sends it to *broad*. Every version is kept and can be rolled back with one click. | Apps & desktop | Intune update rings, SteamOS beta channel and A/B rollback |
 | **Browser URL rules**: block listed sites (on top of the base lock-down) with exceptions, or *allow only* listed sites. In allow-only mode the desktop catalog's systems and Genesys are always allowed, so the agent desktop keeps working. Applies to Chrome on session hosts and Linux endpoints. | Policies | Intune / Chrome Enterprise URL blocklist |
 | **Outbound firewall**: off, or *allow only* listed destinations (IP/CIDR, TCP/UDP, ports) for the agents' own apps. Root and system services (sign-in, home folders, updates, the console) are never filtered, so a wrong rule cannot cut a device off. | Policies | Intune firewall rules, Defender network protection |
+| **Server resources per user**: CPU (100% = one core) and RAM caps for each agent's desktop on the session hosts, so one heavy user cannot slow the others; empty keeps the server default from Ansible. Applied as systemd user-slice limits, including to desktops already running. | Policies | VDI per-session resource limits |
+| **Assignments for AD groups and users**: override the firewall (same as everyone + extra destinations, unrestricted, or allow-only) and the resource limits for an AD group or one user. A user assignment beats a group one; among groups the first listed wins. Members come from AD through SSSD, and users who sign in later pick up their group's rules within one check-in. URL rules stay machine-wide (Chrome on Linux only has machine policy). | Policies → Assignments | Intune assignment groups |
 | **Policy rings**: policies are versioned and go pilot → broad with rollback, exactly like the catalog. Each device reports the version it applied, and a failure raises an alert. | Policies | Intune update rings |
 | **Capacity**: CPU history per session host, desktops per host, alerts at high CPU/RAM | Overview | — |
 | **Alerts**: offline servers (critical), offline devices, not-compliant devices, overloaded hosts | Overview | — |
@@ -99,3 +101,5 @@ Ansible.
   LDAP but can still reach the allowed CRM. Root and SSSD keep working. The broad host changes only
   after Promote, and rollback removes the firewall everywhere.
 - allow-only URLs keep every catalog system and Genesys allowed
+- assignments are validated; a user assignment (allow-only to the CRM) blocks only that user, while the group's RAM/CPU limit reaches the
+  group's other members and the user assignment wins over the group; rollback restores the server defaults

@@ -67,7 +67,9 @@ ACTIONS = {
 RINGS = ["pilot", "broad"]
 POLICY_ROLES = ("session_host", "endpoint")
 EMPTY_POLICY = {"url_mode": "block_listed", "url_block": [], "url_allow": [],
-                "egress_mode": "off", "egress_allow": []}
+                "egress_mode": "off", "egress_allow": [], "limits": {"cpu_pct": 0, "mem_mb": 0},
+                "assignments": []}
+TARGET = re.compile(r"^(group|user):([A-Za-z0-9._@ -]{1,64})$")
 # Things published by ring: table of versions, table of ring -> version, content column.
 VERSIONED = {"catalog": ("catalog_versions", "rings", "items"),
              "policy": ("policy_versions", "policy_rings", "policy")}
@@ -199,8 +201,40 @@ def clean_ports(text):
     return text
 
 
+def clean_rules(raw):
+    rules = []
+    for r in (raw or [])[:200]:
+        dest = str(r.get("dest", "")).strip()
+        try:
+            dest = str(ipaddress.ip_network(dest, strict=False))
+        except ValueError:
+            raise ValueError(f"destination must be an IP address or network (CIDR): {dest!r}") from None
+        proto = r.get("proto", "tcp")
+        if proto not in ("tcp", "udp"):
+            raise ValueError("protocol must be tcp or udp")
+        rules.append({"name": str(r.get("name", "")).strip()[:60], "dest": dest, "proto": proto,
+                      "ports": clean_ports(r.get("ports", ""))})
+    return rules
+
+
+def clean_limits(raw):
+    """Per-user CPU (% of one core, 100 = one core) and RAM (MB); 0 = server default."""
+    raw = raw or {}
+    cpu, mem = int(raw.get("cpu_pct") or 0), int(raw.get("mem_mb") or 0)
+    if not 0 <= cpu <= 6400:
+        raise ValueError("CPU limit must be 0-6400 % of one core")
+    if mem and not 256 <= mem <= 1048576:
+        raise ValueError("RAM limit must be at least 256 MB")
+    return {"cpu_pct": cpu, "mem_mb": mem}
+
+
 def clean_policy(req):
-    """Validate an admin's policy; devices get exactly this, nothing free-form."""
+    """Validate an admin's policy; devices get exactly this, nothing free-form.
+
+    The top level applies to every agent user. `assignments` override the
+    firewall and the resource limits for an AD group or one user; a user
+    assignment beats a group one, and among groups the first listed wins.
+    URL rules stay per machine (Chrome on Linux has machine-wide policy only)."""
     url_mode = req.get("url_mode", "block_listed")
     egress_mode = req.get("egress_mode", "off")
     if url_mode not in ("block_listed", "allow_only"):
@@ -214,21 +248,27 @@ def clean_policy(req):
         if bad:
             raise ValueError(f"not a URL pattern: {bad[0]!r}")
         lists[key] = list(dict.fromkeys(vals))[:500]
-    rules = []
-    for r in req.get("egress_allow", [])[:200]:
-        dest = str(r.get("dest", "")).strip()
-        try:
-            dest = str(ipaddress.ip_network(dest, strict=False))
-        except ValueError:
-            raise ValueError(f"destination must be an IP address or network (CIDR): {dest!r}") from None
-        proto = r.get("proto", "tcp")
-        if proto not in ("tcp", "udp"):
-            raise ValueError("protocol must be tcp or udp")
-        rules.append({"name": str(r.get("name", "")).strip()[:60], "dest": dest, "proto": proto,
-                      "ports": clean_ports(r.get("ports", ""))})
+    rules = clean_rules(req.get("egress_allow"))
     if egress_mode == "allow_only" and not rules:
         raise ValueError("allow-only firewall needs at least one allowed destination")
-    return {"url_mode": url_mode, **lists, "egress_mode": egress_mode, "egress_allow": rules}
+    assignments, seen = [], set()
+    for a in (req.get("assignments") or [])[:50]:
+        target = str(a.get("target", "")).strip().lower()
+        if not TARGET.match(target):
+            raise ValueError(f"assignment target must be group:<AD group> or user:<username>, not {target!r}")
+        if target in seen:
+            raise ValueError(f"{target} is assigned twice")
+        seen.add(target)
+        mode = a.get("egress_mode", "inherit")
+        if mode not in ("inherit", "off", "allow_only"):
+            raise ValueError("assignment firewall must be inherit, off or allow_only")
+        a_rules = clean_rules(a.get("egress_allow"))
+        if mode == "allow_only" and not a_rules:
+            raise ValueError(f"{target}: allow-only firewall needs at least one allowed destination")
+        assignments.append({"target": target, "egress_mode": mode, "egress_allow": a_rules,
+                            "limits": clean_limits(a.get("limits"))})
+    return {"url_mode": url_mode, **lists, "egress_mode": egress_mode, "egress_allow": rules,
+            "limits": clean_limits(req.get("limits")), "assignments": assignments}
 
 
 def compliance_state(comp):
@@ -726,7 +766,8 @@ class Handler(BaseHTTPRequestHandler):
         v = publish_version("policy", user, pol, req.get("note"))
         audit(user, "published policies", f"v{v}",
               f"URLs {pol['url_mode']} ({len(pol['url_block'])} blocked, {len(pol['url_allow'])} allowed); "
-              f"firewall {pol['egress_mode']} ({len(pol['egress_allow'])} rules); to pilot ring")
+              f"firewall {pol['egress_mode']} ({len(pol['egress_allow'])} rules); "
+              f"{len(pol['assignments'])} group/user assignments; to pilot ring")
         self.send(200, {"version": v, "ring": "pilot"})
 
     def api_set_ring(self, user, dev):

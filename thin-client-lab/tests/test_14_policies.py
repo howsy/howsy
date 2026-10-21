@@ -117,3 +117,52 @@ def test_allow_only_urls_keep_desktop_systems_and_genesys(lab, cfg, c):
         c.post("/api/policy/rollback", {"version": start})
         c.post(f"/api/devices/{cfg['session_hosts'][0]}/ring", {"ring": "broad"})
     wait_for(lambda: url_rules(host).get("URLBlocklist") != ["*"], 45, what="rollback")
+
+
+def test_assignments_are_validated(c):
+    def publish(body):
+        return c.s.post(f"{c.url}/api/policy", json=body, timeout=10)
+    assert publish({"assignments": [{"target": "everyone"}]}).status_code == 400
+    assert publish({"assignments": [{"target": "group:cc-agents-test"}, {"target": "GROUP:CC-Agents-Test"}]}).status_code == 400
+    assert publish({"assignments": [{"target": "user:agent2", "egress_mode": "allow_only"}]}).status_code == 400
+    assert publish({"limits": {"mem_mb": 10}}).status_code == 400
+
+
+def slice_value(host, uid, prop):
+    return host.check_output(f"systemctl show user-{uid}.slice -p {prop} --value")
+
+
+@pytest.mark.slow
+def test_group_and_user_assignments(lab, cfg, c):
+    """Everyone: no firewall, 3 GB each. Group CC-Agents-Test: 1.5 GB and 1.5 cores.
+    User agent2 (also in that group): allow-only to the CRM; a user assignment
+    beats the group one, so agent2 gets everyone's limits."""
+    name = cfg["session_hosts"][0]
+    host = lab.host(name)
+    a1, a2 = cfg["users"]["agent"]["username"], cfg["users"]["agent_b"]["username"]
+    uid1, uid2 = (host.check_output(f"id -u {q(u)}") for u in (a1, a2))
+    crm_ip = host.check_output("getent hosts crm.lab.example.com | awk '{print $1}'")
+    start = c.get("/api/policy")["rings"]["broad"]
+    c.post(f"/api/devices/{name}/ring", {"ring": "pilot"})
+    try:
+        c.post("/api/policy", {
+            "egress_mode": "off", "limits": {"mem_mb": 3072},
+            "assignments": [
+                {"target": "group:CC-Agents-Test", "egress_mode": "inherit", "limits": {"cpu_pct": 150, "mem_mb": 1536}},
+                {"target": f"user:{a2}", "egress_mode": "allow_only",
+                 "egress_allow": [{"name": "CRM", "dest": f"{crm_ip}/32", "proto": "tcp", "ports": "80"}]},
+            ]})
+        wait_for(lambda: not tcp_as(host, a2, *DC_LDAP), 45, what=f"{a2} limited by the user assignment")
+        assert tcp_as(host, a2, crm_ip, 80), f"{a2} keeps the destination its assignment allows"
+        assert tcp_as(host, a1, *DC_LDAP), f"{a1} (group only) is not firewalled"
+        wait_for(lambda: slice_value(host, uid1, "MemoryMax") == str(1536 * 2**20), 30, what="group RAM limit for agent1")
+        assert slice_value(host, uid1, "CPUQuotaPerSecUSec") == "1.500000s"
+        assert slice_value(host, uid2, "MemoryMax") == str(3072 * 2**20), "user assignment wins: everyone's limit"
+        applied = lambda: next(d for d in c.get("/api/policy")["devices"] if d["id"] == name)["applied"]
+        wait_for(lambda: applied().get("assigned_users", {}).get(f"user:{a2}") == 1, 30,
+                 what="device reports the users each assignment covers")
+    finally:
+        c.post("/api/policy/rollback", {"version": start})
+        c.post(f"/api/devices/{name}/ring", {"ring": "broad"})
+    wait_for(lambda: tcp_as(host, a2, *DC_LDAP), 45, what="assignment removed after rollback")
+    wait_for(lambda: slice_value(host, uid1, "MemoryMax") == str(4 * 2**30), 30, what="server default limits back")

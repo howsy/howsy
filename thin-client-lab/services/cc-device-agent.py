@@ -11,6 +11,7 @@ rules (an extra Chrome managed-policy file) and an outbound firewall for agent
 users' traffic (nftables; root and system services are never filtered).
 """
 import base64
+import grp
 import json
 import os
 import pwd
@@ -35,6 +36,8 @@ CHROME_DIR = "/etc/opt/chrome/policies/managed"
 # lock-down), so it carries the base URLBlocklist plus the console's rules.
 CHROME_BASE = f"{CHROME_DIR}/cc-policy.json"
 CHROME_URLS = f"{CHROME_DIR}/cc-urls.json"
+EMPTY_POLICY = {"url_mode": "block_listed", "url_block": [], "url_allow": [], "egress_mode": "off",
+                "egress_allow": [], "limits": {}, "assignments": []}
 
 
 def ad_domain():
@@ -236,15 +239,18 @@ def load_json(path):
 
 
 def write_if_changed(path, text, mode=0o644):
+    """True if the file was (re)written."""
     try:
         if open(path).read() == text:
-            return
+            return False
     except OSError:
         pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".tmp", "w") as f:
         f.write(text)
     os.chmod(path + ".tmp", mode)
     os.replace(path + ".tmp", path)
+    return True
 
 
 def chrome_url_policy(pol):
@@ -262,12 +268,79 @@ def chrome_url_policy(pol):
     return {"URLBlocklist": list(dict.fromkeys(block)), "URLAllowlist": list(dict.fromkeys(allow))}
 
 
-def nft_ruleset(pol):
+def agent_uids_running():
+    """uids (>= 1000, not nobody) that have processes on this machine now."""
+    out = sh("ps -eo uid= | sort -u").stdout.split()
+    return {int(u) for u in out if u.isdigit() and int(u) >= 1000 and int(u) != 65534}
+
+
+def resolve_assignments(pol):
+    """uid -> index into pol['assignments']. User targets beat group targets;
+    among groups the first listed wins. Group members come from the directory
+    (SSSD) and, for users signed in now, from their full group list, so nested
+    and primary groups count too."""
+    assignments = pol.get("assignments", [])
+    running = agent_uids_running()
+    owner = {}
+    for kind in ("user", "group"):
+        for i, a in enumerate(assignments):
+            t_kind, name = a["target"].split(":", 1)
+            if t_kind != kind:
+                continue
+            uids = set()
+            if kind == "user":
+                try:
+                    uids.add(pwd.getpwnam(name).pw_uid)
+                except KeyError:
+                    pass
+            else:
+                try:
+                    g = grp.getgrnam(name)
+                except KeyError:
+                    continue
+                for m in g.gr_mem:
+                    try:
+                        uids.add(pwd.getpwnam(m).pw_uid)
+                    except KeyError:
+                        pass
+                for uid in running:
+                    try:
+                        pw = pwd.getpwuid(uid)
+                        if g.gr_gid in os.getgrouplist(pw.pw_name, pw.pw_gid):
+                            uids.add(uid)
+                    except KeyError:
+                        pass
+            for uid in uids:
+                if uid >= 1000 and uid != 65534:
+                    owner.setdefault(uid, i)
+    return owner
+
+
+def _rule_lines(rules):
+    out = []
+    for r in rules:
+        fam = "ip6" if ":" in r["dest"] else "ip"
+        match = f"{r['proto']} dport {{ {r['ports'].replace(',', ', ')} }}" if r["ports"] else f"meta l4proto {r['proto']}"
+        name = re.sub(r"[^A-Za-z0-9 ._-]", "", r.get("name") or "")[:60]
+        out.append(f'    {fam} daddr {r["dest"]} {match} accept comment "{name or r["dest"]}"')
+    return out
+
+
+REJECT = ['    limit rate 10/minute log prefix "cc-policy blocked: "',
+          "    meta l4proto tcp reject with tcp reset",
+          "    reject"]
+
+
+def nft_ruleset(pol, owner):
     """Outbound allow-list for sockets owned by agent users (uid >= 1000, not
     nobody). Root, system services and kernel traffic (NFS, sssd) are untouched,
-    so a bad rule can cut off an agent's apps but never the machine itself."""
+    so a bad rule can cut off an agent's apps but never the machine itself.
+    Users with a group/user assignment go to that assignment's chain first."""
     out = ["table inet cc_policy", "delete table inet cc_policy"]   # idempotent replace
-    if pol["egress_mode"] != "allow_only":
+    assignments = pol.get("assignments", [])
+    used = sorted(set(owner.values()))
+    needed = pol["egress_mode"] == "allow_only" or any(assignments[i]["egress_mode"] == "allow_only" for i in used)
+    if not needed:
         return "\n".join(out) + "\n"
     out += ["table inet cc_policy {",
             "  chain output {",
@@ -277,49 +350,123 @@ def nft_ruleset(pol):
             "  chain agent {",
             '    oif "lo" accept',
             "    ct state established,related accept"]
-    for r in pol["egress_allow"]:
-        fam = "ip6" if ":" in r["dest"] else "ip"
-        match = f"{r['proto']} dport {{ {r['ports'].replace(',', ', ')} }}" if r["ports"] else f"meta l4proto {r['proto']}"
-        name = re.sub(r"[^A-Za-z0-9 ._-]", "", r.get("name") or "")[:60]
-        out.append(f'    {fam} daddr {r["dest"]} {match} accept comment "{name or r["dest"]}"')
-    out += ['    limit rate 10/minute log prefix "cc-policy blocked: "',
-            "    meta l4proto tcp reject with tcp reset",
-            "    reject",
-            "  }",
-            "}"]
+    for i in used:
+        uids = ", ".join(str(u) for u in sorted(u for u, j in owner.items() if j == i))
+        out.append(f"    meta skuid {{ {uids} }} goto assign_{i}")
+    out += ["    goto everyone", "  }",
+            "  chain everyone {"]
+    out += _rule_lines(pol["egress_allow"]) + REJECT if pol["egress_mode"] == "allow_only" else ["    accept"]
+    out.append("  }")
+    for i in used:
+        a = assignments[i]
+        out.append(f"  chain assign_{i} {{")
+        if a["egress_mode"] == "off":
+            out.append("    accept")
+        elif a["egress_mode"] == "allow_only":
+            out += _rule_lines(a["egress_allow"]) + REJECT
+        else:                                    # inherit: extra destinations, then the everyone rules
+            out += _rule_lines(a["egress_allow"]) + ["    goto everyone"]
+        out.append("  }")
+    out.append("}")
     return "\n".join(out) + "\n"
 
 
+SLICE_DROPIN = "60-cc-policy.conf"
+
+
+def slice_conf(limits):
+    lines = []
+    if limits.get("cpu_pct"):
+        lines.append(f"CPUQuota={limits['cpu_pct']}%")
+    if limits.get("mem_mb"):
+        lines.append(f"MemoryMax={limits['mem_mb']}M")
+    return "# Written by cc-device-agent from the console's policies.\n[Slice]\n" + "\n".join(lines) + "\n" if lines else None
+
+
+def apply_limits(pol, owner):
+    """Per-user CPU/RAM caps on session hosts as systemd user-slice drop-ins:
+    the policy's limits for everyone (user-.slice.d), an assignment's limits for
+    its users (user-<uid>.slice.d). 0 keeps the server's own default."""
+    base = pol.get("limits") or {}
+    want = {"/etc/systemd/system/user-.slice.d/" + SLICE_DROPIN: slice_conf(base)}
+    for uid, i in owner.items():
+        a_lim = pol["assignments"][i].get("limits") or {}
+        if a_lim.get("cpu_pct") or a_lim.get("mem_mb"):
+            merged = {k: a_lim.get(k) or base.get(k) for k in ("cpu_pct", "mem_mb")}
+            want[f"/etc/systemd/system/user-{uid}.slice.d/{SLICE_DROPIN}"] = slice_conf(merged)
+    changed = False
+    for d in os.listdir("/etc/systemd/system"):
+        path = f"/etc/systemd/system/{d}/{SLICE_DROPIN}"
+        if d.startswith("user-") and d.endswith(".slice.d") and os.path.exists(path) and not want.get(path):
+            os.remove(path)
+            changed = True
+    for path, text in want.items():
+        if text:
+            changed |= write_if_changed(path, text)
+    if changed:
+        running = agent_uids_running()
+        for uid in running:                      # our earlier --runtime values would shadow /etc
+            for prop in ("CPUQuota", "MemoryMax"):
+                try:
+                    os.remove(f"/run/systemd/system.control/user-{uid}.slice.d/50-{prop}.conf")
+                except OSError:
+                    pass
+        sh(["systemctl", "daemon-reload"])
+        for uid in running:                      # re-apply to desktops already running
+            props = sh(["systemctl", "show", f"user-{uid}.slice", "-p", "CPUQuotaPerSecUSec", "-p", "MemoryMax"]).stdout
+            vals = dict(l.split("=", 1) for l in props.splitlines() if "=" in l)
+            args = []
+            if vals.get("CPUQuotaPerSecUSec", "infinity") != "infinity":
+                secs = vals["CPUQuotaPerSecUSec"].rstrip("s")
+                args.append(f"CPUQuota={round(float(secs.rstrip('m')) / (1000 if secs.endswith('m') else 1) * 100)}%")
+            if vals.get("MemoryMax", "infinity") != "infinity":
+                args.append(f"MemoryMax={vals['MemoryMax']}")
+            if args:
+                sh(["systemctl", "set-property", "--runtime", f"user-{uid}.slice"] + args)
+    return changed
+
+
 def apply_policy(entry, force=False):
-    """entry = {"version": n, "policy": {...}} from the console."""
+    """entry = {"version": n, "policy": {...}} from the console. Runs on every
+    check-in (cheap: files and rules are only rewritten when they change), so a
+    user who signs in later gets their group's rules within one check-in."""
     global policy_state
-    pol = entry["policy"]
+    pol = dict(EMPTY_POLICY, **entry["policy"])
     with policy_lock:
-        if not force and policy_state.get("version") == entry["version"] and not policy_state.get("error"):
-            return
         errors = []
         if os.path.isdir(CHROME_DIR):
             try:
                 write_if_changed(CHROME_URLS, json.dumps(chrome_url_policy(pol), indent=4, sort_keys=True) + "\n")
             except OSError as e:
                 errors.append(f"browser: {e}")
-        rules = nft_ruleset(pol)
-        if pol["egress_mode"] == "allow_only" or os.path.exists(NFT_RULES):
-            write_if_changed(NFT_RULES, rules, 0o600)
-            r = sh(["nft", "-f", NFT_RULES])
-            if r.returncode != 0:
-                errors.append("firewall: " + (r.stderr or r.stdout or "nft failed").strip()[-300:])
-        os.makedirs(os.path.dirname(POLICY), exist_ok=True)
+        owner = resolve_assignments(pol)
+        rules = nft_ruleset(pol, owner)
+        if rules.count("\n") > 2 or os.path.exists(NFT_RULES):
+            if write_if_changed(NFT_RULES, rules, 0o600) or force or policy_state.get("error"):
+                r = sh(["nft", "-f", NFT_RULES])
+                if r.returncode != 0:
+                    errors.append("firewall: " + (r.stderr or r.stdout or "nft failed").strip()[-300:])
+        if ROLE == "session_host":
+            try:
+                apply_limits(pol, owner)
+            except OSError as e:
+                errors.append(f"limits: {e}")
         write_if_changed(POLICY, json.dumps(entry, indent=2) + "\n", 0o600)
         changed = policy_state.get("version") != entry["version"]
+        counts = {}
+        for i in owner.values():
+            t = pol["assignments"][i]["target"]
+            counts[t] = counts.get(t, 0) + 1
         policy_state = {"version": entry["version"], "url_mode": pol["url_mode"],
                         "url_rules": len(pol["url_block"]) + len(pol["url_allow"]),
                         "egress_mode": pol["egress_mode"], "egress_rules": len(pol["egress_allow"]),
+                        "limits": pol.get("limits"), "assigned_users": counts,
                         "applied_at": time.time(), "error": "; ".join(errors) or None}
-    if errors:
+    if errors and (changed or force):
         event("policy", f"policies v{entry['version']} NOT applied: {policy_state['error']}")
     elif changed or force:
-        event("policy", f"policies v{entry['version']} applied (URLs: {pol['url_mode']}, firewall: {pol['egress_mode']})")
+        event("policy", f"policies v{entry['version']} applied (URLs: {pol['url_mode']}, firewall: {pol['egress_mode']}, "
+                        f"{len(pol['assignments'])} group/user assignments)")
 
 
 # ---- acting inside an agent's desktop session --------------------------------

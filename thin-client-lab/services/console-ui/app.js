@@ -395,13 +395,32 @@ async function apps(reset) {
   bindRings("catalog", apps);
 }
 
-// ---- policies: browser URL rules + outbound firewall ------------------------------
+// ---- policies: browser URL rules, outbound firewall, limits, assignments -----------
+const FW_MODES = { inherit: "Same as everyone + extra", off: "Unrestricted", allow_only: "Allow only listed" };
+function rulesEditor(owner, rules) {
+  return `<div class="table-wrap editor"><table><thead><tr><th>Name</th><th>Destination (IP / CIDR)</th><th>Protocol</th><th>Ports</th><th></th></tr></thead><tbody>
+    ${rules.map((r, i) => `<tr>
+      <td><input data-rl="${owner}|${i}|name" value="${esc(r.name)}" placeholder="CRM"></td>
+      <td><input data-rl="${owner}|${i}|dest" value="${esc(r.dest)}" placeholder="10.10.0.0/24" class="mono"></td>
+      <td><select data-rl="${owner}|${i}|proto">${["tcp", "udp"].map(x => `<option ${x === r.proto ? "selected" : ""}>${x}</option>`).join("")}</select></td>
+      <td><input data-rl="${owner}|${i}|ports" value="${esc(r.ports)}" placeholder="any, or 80,443" class="mono"></td>
+      <td><button class="icon-btn danger" data-delrl="${owner}|${i}" title="Remove">${icon("x")}</button></td></tr>`).join("") ||
+      `<tr><td colspan="5" class="muted">No destinations yet.</td></tr>`}</tbody></table></div>
+    <button data-addrl="${owner}" style="margin-top:10px">${icon("plus")}Add destination</button>`;
+}
+function limitsEditor(owner, lim, hint) {
+  return `<div class="limits">
+    <label>CPU per user <span class="unit-input"><input type="number" min="0" step="25" data-lim="${owner}|cpu_pct" value="${lim.cpu_pct || ""}" placeholder="${hint.cpu}"><span>% of a core</span></span></label>
+    <label>RAM per user <span class="unit-input"><input type="number" min="0" step="256" data-lim="${owner}|mem_mb" value="${lim.mem_mb || ""}" placeholder="${hint.mem}"><span>MB</span></span></label></div>`;
+}
+
 async function policies(reset) {
   const data = await api("/api/policy");
   const current = data.versions.find(v => v.version === data.rings.pilot) || { policy: {} };
   if (reset) policies.draft = null;
   const p = policies.draft = policies.draft || JSON.parse(JSON.stringify({
-    url_mode: "block_listed", url_block: [], url_allow: [], egress_mode: "off", egress_allow: [], ...current.policy }));
+    url_mode: "block_listed", url_block: [], url_allow: [], egress_mode: "off", egress_allow: [],
+    limits: { cpu_pct: 0, mem_mb: 0 }, assignments: [], ...current.policy }));
   const chips = (key, cls) => `<div class="chips">${p[key].map((u, i) =>
     `<span class="chip ${cls}">${esc(u)}<button data-unchip="${key}|${i}" title="Remove">${icon("x")}</button></span>`).join("") ||
     `<span class="faint">None.</span>`}</div>
@@ -409,9 +428,11 @@ async function policies(reset) {
     <button data-chip-add="${key}">${icon("plus")}Add</button></div>`;
   const allowOnly = p.url_mode === "allow_only";
   const fwOn = p.egress_mode === "allow_only";
+  const owners = { base: p };
+  p.assignments.forEach((a, i) => owners[`a${i}`] = a);
   main.innerHTML = `
-    ${head("Policies", `Browser and network rules for agents on session hosts and endpoints. Like the desktop catalog,
-      a new version goes to the <b>pilot</b> ring first and can be promoted or rolled back.`, "", "policy")}
+    ${head("Policies", `Rules for every agent on the session hosts and endpoints, set once here and applied by the server to
+      all users. Override them for an AD group or one person under <b>Assignments</b>. A new version goes to the <b>pilot</b> ring first.`, "", "policy")}
     <div class="grid cols-2">
       <div class="card"><div class="card-head"><h2>${icon("globe")}Browser · URL rules</h2>
         <div class="seg"><button data-urlmode="block_listed" class="${allowOnly ? "" : "on"}">Block listed sites</button>
@@ -420,54 +441,81 @@ async function policies(reset) {
             <div class="note">${icon("check")}<span>Every system in the desktop catalog and Genesys are always allowed, so the agent desktop keeps working.</span></div>`
           : `<div class="field-label">Blocked sites</div>${chips("url_block", "block")}
              <div class="field-label">Exceptions (always allowed)</div>${chips("url_allow", "allow")}
-             <div class="note">${icon("policy")}<span>Added on top of the base lock-down (no <code>file://</code>, no <code>chrome://flags</code>). Uses Chrome's URL filter format.</span></div>`}
+             <div class="note">${icon("policy")}<span>Added on top of the base lock-down (no <code>file://</code>, no <code>chrome://flags</code>). Uses Chrome's URL filter format. URL rules apply to the whole machine.</span></div>`}
       </div>
-      <div class="card"><div class="card-head"><h2>${icon("wall")}Outbound firewall</h2>
+      <div class="card"><div class="card-head"><h2>${icon("wall")}Outbound firewall · everyone</h2>
         <div class="seg"><button data-fw="off" class="${fwOn ? "" : "on"}">Off</button>
           <button data-fw="allow_only" class="${fwOn ? "on" : ""}">Allow only listed destinations</button></div></div>
-        ${fwOn ? `<div class="table-wrap editor"><table><thead><tr><th>Name</th><th>Destination (IP / CIDR)</th><th>Protocol</th><th>Ports</th><th></th></tr></thead><tbody>
-          ${p.egress_allow.map((r, i) => `<tr>
-            <td><input data-rule="${i}" data-k="name" value="${esc(r.name)}" placeholder="CRM"></td>
-            <td><input data-rule="${i}" data-k="dest" value="${esc(r.dest)}" placeholder="10.10.0.0/24" class="mono"></td>
-            <td><select data-rule="${i}" data-k="proto">${["tcp", "udp"].map(x => `<option ${x === r.proto ? "selected" : ""}>${x}</option>`).join("")}</select></td>
-            <td><input data-rule="${i}" data-k="ports" value="${esc(r.ports)}" placeholder="any, or 80,443" class="mono"></td>
-            <td><button class="icon-btn danger" data-delrule="${i}" title="Remove">${icon("x")}</button></td></tr>`).join("") ||
-            `<tr><td colspan="5" class="muted">No destinations yet: agents' apps could reach nothing.</td></tr>`}</tbody></table></div>
-          <button id="addrule" style="margin-top:10px">${icon("plus")}Add destination</button>`
-          : `<div class="empty">Agents' apps may connect anywhere the network allows.</div>`}
+        ${fwOn ? rulesEditor("base", p.egress_allow) : `<div class="empty">Agents' apps may connect anywhere the network allows.</div>`}
         <div class="note">${icon("policy")}<span>Only agents' own apps are filtered. The machine itself (sign-in, home folders, updates, this console) is never blocked, so a wrong rule cannot cut a device off.</span></div>
       </div>
     </div>
+    <div class="card mt"><div class="card-head"><h2>${icon("server")}Server resources per user · everyone</h2>
+      <span class="muted">Each agent desktop runs on the server, never on the laptop</span></div>
+      ${limitsEditor("base", p.limits || {}, { cpu: "server default (200)", mem: "server default (4096)" })}
+      <div class="note">${icon("policy")}<span>Caps how much of the session host one agent's desktop can use, so one heavy user cannot slow everyone else down.
+        100% = one CPU core. Empty keeps the server's default. Size the server with <code>tools/capacity_sizing.py</code>.</span></div></div>
+
+    <div class="card mt"><div class="card-head"><h2>${icon("sessions")}Assignments · groups and users</h2>
+      <button id="add-assign">${icon("plus")}Add assignment</button></div>
+      <p class="muted" style="margin-top:-6px">Override the firewall and resource limits for an AD group or one user. A user assignment beats a group one;
+        among groups the first in this list wins. URL rules always apply to the whole machine (Chrome on Linux has machine-wide policy only).</p>
+      ${p.assignments.map((a, i) => { const [kind, name] = (a.target || "group:").split(":"); return `<div class="assign">
+        <div class="assign-head"><span class="badge b-violet">#${i + 1}</span>
+          <select data-akind="${i}"><option value="group" ${kind === "group" ? "selected" : ""}>AD group</option><option value="user" ${kind === "user" ? "selected" : ""}>User</option></select>
+          <input data-aname="${i}" value="${esc(name || "")}" placeholder="${kind === "user" ? "agent2" : "CC-Agents-Test"}">
+          <span class="row" style="margin-left:auto">${i > 0 ? `<button class="icon-btn" data-aup="${i}" title="Move up">↑</button>` : ""}
+          <button class="icon-btn danger" data-adel="${i}" title="Remove">${icon("x")}</button></span></div>
+        <div class="grid cols-2">
+          <div><div class="field-label">Firewall</div>
+            <div class="seg" style="margin:8px 0">${Object.entries(FW_MODES).map(([k, v]) => `<button data-amode="${i}|${k}" class="${a.egress_mode === k ? "on" : ""}">${v}</button>`).join("")}</div>
+            ${a.egress_mode === "off" ? `<div class="muted">This ${kind}'s apps may connect anywhere.</div>` : rulesEditor(`a${i}`, a.egress_allow)}
+            ${a.egress_mode === "inherit" ? `<div class="muted" style="margin-top:6px">Gets everyone's rules plus these destinations.</div>` : ""}</div>
+          <div><div class="field-label">Server resources per user</div>
+            ${limitsEditor(`a${i}`, a.limits || {}, { cpu: "same as everyone", mem: "same as everyone" })}</div>
+        </div></div>`; }).join("") || `<div class="empty">No assignments: everyone gets the rules above.</div>`}
+    </div>
+
     <div class="publish-bar"><span class="muted">Editing from v${current.version}</span><input id="note" placeholder="What changed? (shown in the version history)">
       <button id="discard">Discard changes</button><button class="primary" id="publish">${icon("rocket")}Publish to pilot</button></div>
     <div class="grid cols-2 mt">
       <div class="card flush"><div class="card-head"><h2>${icon("devices")}Devices</h2><span class="muted">what each device has applied</span></div>
-        <div class="table-wrap"><table><thead><tr><th>Device</th><th>Ring</th><th>Applied</th><th>URLs</th><th>Firewall</th></tr></thead><tbody>
+        <div class="table-wrap"><table><thead><tr><th>Device</th><th>Ring</th><th>Applied</th><th>Firewall</th><th>Assigned users</th></tr></thead><tbody>
         ${data.devices.map(d => { const a = d.applied; const want = data.rings[d.ring]; return `<tr>
-          <td><span class="dot ${d.online ? "on" : "off"}" title="${d.online ? "online" : "offline"}"></span>${devLink(d.id)}</td><td><span class="badge ${d.ring === "pilot" ? "b-violet" : "b-plain"}">${esc(d.ring)}</span></td>
+          <td><span class="dot ${d.online ? "on" : "off"}" title="${d.online ? "online" : "offline"}"></span>${devLink(d.id)}</td>
+          <td><span class="badge ${d.ring === "pilot" ? "b-violet" : "b-plain"}">${esc(d.ring)}</span></td>
           <td>${!a ? `<span class="badge b-plain">waiting</span>` : a.error ? `<span class="badge b-bad" title="${esc(a.error)}">v${a.version} failed</span>`
             : `<span class="badge ${a.version === want ? "b-ok" : "b-warn"}">v${a.version}${a.version === want ? "" : ` → v${want}`}</span>`}</td>
-          <td class="muted">${a ? (a.url_mode === "allow_only" ? "allow-only" : `block list (${a.url_rules})`) : ""}</td>
-          <td class="muted">${a ? (a.egress_mode === "allow_only" ? `allow-only (${a.egress_rules})` : "off") : ""}</td></tr>`; }).join("") ||
+          <td class="muted">${a ? (a.egress_mode === "allow_only" ? `allow-only (${plural(a.egress_rules, "rule")})` : "off") : ""}</td>
+          <td class="muted">${a && a.assigned_users && Object.keys(a.assigned_users).length ? Object.entries(a.assigned_users).map(([t, n]) => `${esc(t)}: ${n}`).join(", ") : "–"}</td></tr>`; }).join("") ||
           `<tr><td colspan="5" class="muted">No session hosts or endpoints reporting yet.</td></tr>`}</tbody></table></div></div>
-      ${ringsCard("policy", data, v => `URLs ${v.policy.url_mode === "allow_only" ? "allow-only" : `${v.policy.url_block.length} blocked`} · firewall ${v.policy.egress_mode === "allow_only" ? plural(v.policy.egress_allow.length, "rule") : "off"}`, "Rules")}
+      ${ringsCard("policy", data, v => `URLs ${v.policy.url_mode === "allow_only" ? "allow-only" : `${v.policy.url_block.length} blocked`} · firewall ${v.policy.egress_mode === "allow_only" ? plural(v.policy.egress_allow.length, "rule") : "off"}${(v.policy.assignments || []).length ? ` · ${plural(v.policy.assignments.length, "assignment")}` : ""}`, "Rules")}
     </div>`;
 
-  main.querySelectorAll("[data-urlmode]").forEach(b => b.onclick = () => { p.url_mode = b.dataset.urlmode; policies(); });
-  main.querySelectorAll("[data-fw]").forEach(b => b.onclick = () => { p.egress_mode = b.dataset.fw; policies(); });
-  main.querySelectorAll("[data-unchip]").forEach(b => b.onclick = () => { const [k, i] = b.dataset.unchip.split("|"); p[k].splice(+i, 1); policies(); });
+  const redraw = () => policies();
+  main.querySelectorAll("[data-urlmode]").forEach(b => b.onclick = () => { p.url_mode = b.dataset.urlmode; redraw(); });
+  main.querySelectorAll("[data-fw]").forEach(b => b.onclick = () => { p.egress_mode = b.dataset.fw; redraw(); });
+  main.querySelectorAll("[data-unchip]").forEach(b => b.onclick = () => { const [k, i] = b.dataset.unchip.split("|"); p[k].splice(+i, 1); redraw(); });
   const addChip = key => {
-    const inp = main.querySelector(`[data-chip-input="${key}"]`);
-    const v = inp.value.trim();
+    const v = main.querySelector(`[data-chip-input="${key}"]`).value.trim();
     if (v && !p[key].includes(v)) p[key].push(v);
-    policies();
+    redraw();
     main.querySelector(`[data-chip-input="${key}"]`)?.focus();
   };
   main.querySelectorAll("[data-chip-add]").forEach(b => b.onclick = () => addChip(b.dataset.chipAdd));
   main.querySelectorAll("[data-chip-input]").forEach(inp => inp.onkeydown = e => { if (e.key === "Enter") addChip(inp.dataset.chipInput); });
-  main.querySelectorAll("[data-rule]").forEach(inp => inp.oninput = inp.onchange = () => { p.egress_allow[+inp.dataset.rule][inp.dataset.k] = inp.value; });
-  main.querySelectorAll("[data-delrule]").forEach(b => b.onclick = () => { p.egress_allow.splice(+b.dataset.delrule, 1); policies(); });
-  if ($("#addrule")) $("#addrule").onclick = () => { p.egress_allow.push({ name: "", dest: "", proto: "tcp", ports: "" }); policies(); };
+  main.querySelectorAll("[data-rl]").forEach(inp => inp.oninput = inp.onchange = () => {
+    const [o, i, k] = inp.dataset.rl.split("|"); owners[o].egress_allow[+i][k] = inp.value; });
+  main.querySelectorAll("[data-delrl]").forEach(b => b.onclick = () => { const [o, i] = b.dataset.delrl.split("|"); owners[o].egress_allow.splice(+i, 1); redraw(); });
+  main.querySelectorAll("[data-addrl]").forEach(b => b.onclick = () => { owners[b.dataset.addrl].egress_allow.push({ name: "", dest: "", proto: "tcp", ports: "" }); redraw(); });
+  main.querySelectorAll("[data-lim]").forEach(inp => inp.oninput = () => {
+    const [o, k] = inp.dataset.lim.split("|"); owners[o].limits = owners[o].limits || {}; owners[o].limits[k] = +inp.value || 0; });
+  $("#add-assign").onclick = () => { p.assignments.push({ target: "group:", egress_mode: "inherit", egress_allow: [], limits: { cpu_pct: 0, mem_mb: 0 } }); redraw(); };
+  main.querySelectorAll("[data-akind]").forEach(s => s.onchange = () => { const a = p.assignments[+s.dataset.akind]; a.target = `${s.value}:${a.target.split(":")[1] || ""}`; redraw(); });
+  main.querySelectorAll("[data-aname]").forEach(inp => inp.oninput = () => { const a = p.assignments[+inp.dataset.aname]; a.target = `${a.target.split(":")[0]}:${inp.value.trim()}`; });
+  main.querySelectorAll("[data-amode]").forEach(b => b.onclick = () => { const [i, m] = b.dataset.amode.split("|"); p.assignments[+i].egress_mode = m; redraw(); });
+  main.querySelectorAll("[data-adel]").forEach(b => b.onclick = () => { p.assignments.splice(+b.dataset.adel, 1); redraw(); });
+  main.querySelectorAll("[data-aup]").forEach(b => b.onclick = () => { const i = +b.dataset.aup; [p.assignments[i - 1], p.assignments[i]] = [p.assignments[i], p.assignments[i - 1]]; redraw(); });
   $("#discard").onclick = () => policies(true);
   $("#publish").onclick = async () => {
     try {

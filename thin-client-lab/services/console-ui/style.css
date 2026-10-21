@@ -227,3 +227,15 @@ pre { white-space: pre-wrap; font-size: 12px; background: var(--bg-2); padding: 
   .cols-2 { grid-template-columns: 1fr; }
   .kv { grid-template-columns: 120px 1fr; }
 }
+
+/* ---- policy assignments + limits --------------------------------------- */
+.limits { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
+.limits label { display: grid; gap: 6px; font-weight: 600; font-size: 13px; }
+.unit-input { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); overflow: hidden; }
+.unit-input input { border: none; border-radius: 0; width: 170px; background: transparent; box-shadow: none !important; }
+.unit-input span { padding: 0 11px; color: var(--muted); font-weight: 500; font-size: 12.5px; border-left: 1px solid var(--line); align-self: stretch; display: grid; place-items: center; }
+.assign { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 12px; background: var(--panel-2); }
+.assign-head { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.assign-head input { width: 240px; }
+.assign .seg { flex-wrap: wrap; }
+.editor td input.mono { min-width: 120px; }
