@@ -4,9 +4,12 @@ Wants=network-online.target
 After=network-online.target
 # Nobody can log in until the tunnel is up, so AD login works as in the office.
 Before=systemd-user-sessions.service display-manager.service
-{% if is_container %}
 
 [Service]
+# Lookups for the AD domain go to the internal DNS while the tunnel is up.
+ExecStartPost=/usr/local/sbin/cc-vpn-dns up %i
+ExecStopPost=/usr/local/sbin/cc-vpn-dns down %i
+{% if is_container %}
 Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
 Environment=WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1
 {% endif %}

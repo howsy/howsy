@@ -2,8 +2,9 @@
 [Interface]
 PrivateKey = {{ vpn_private_key }}
 Address = {{ vpn_address }}/32
-PostUp = /usr/local/sbin/cc-vpn-dns up %i
-PreDown = /usr/local/sbin/cc-vpn-dns down %i
+# DNS for the AD domain is switched by systemd around this tunnel (see the
+# wg-quick@wg0 drop-in), not by PostUp: on newer Ubuntu, AppArmor confines what
+# wg-quick may execute.
 
 [Peer]
 PublicKey = {{ vpn_gateway_pubkey }}
