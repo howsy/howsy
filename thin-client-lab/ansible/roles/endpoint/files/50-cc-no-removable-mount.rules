@@ -1,0 +1,7 @@
+// Second line of defence: only admins may mount filesystems through udisks.
+polkit.addRule(function(action, subject) {
+  if (action.id.indexOf("org.freedesktop.udisks2.filesystem-mount") === 0 &&
+      !subject.isInGroup("sudo")) {
+    return polkit.Result.NO;
+  }
+});

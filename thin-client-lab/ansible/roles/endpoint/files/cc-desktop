@@ -1,0 +1,5 @@
+#!/bin/sh
+# Opens the session-host farm. Remmina asks for the AD username and password.
+mkdir -p "$HOME/.local/share/remmina"
+cp -n /etc/cc/cc-desktop.remmina "$HOME/.local/share/remmina/cc-desktop.remmina"
+exec remmina -c "$HOME/.local/share/remmina/cc-desktop.remmina"

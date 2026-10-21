@@ -1,0 +1,74 @@
+# Targets for the simulated lab (docker compose). Values like ${AGENT_PASSWORD}
+# come from the environment / .env.
+mode: sim
+domain: lab.example.com
+
+hosts:                     # testinfra connection strings
+  dc: docker://cclab-dc
+  sh-01: docker://cclab-sh-01
+  sh-02: docker://cclab-sh-02
+  lb: docker://cclab-lb
+  guac-db: docker://cclab-guac-db
+  guacd: docker://cclab-guacd
+  proxy: docker://cclab-proxy
+  vpn-gw: docker://cclab-vpn-gw
+  ep-office-01: docker://cclab-ep-office-01
+  ep-home-01: docker://cclab-ep-home-01
+  probe: docker://cclab-probe
+
+# Interactive terminal on a host (for password-change prompts)
+tty_command: docker exec -it cclab-{host}
+# Simulated host failure / recovery
+power_off: docker stop cclab-{host}
+power_on: docker start cclab-{host}
+
+session_hosts: [sh-01, sh-02]
+office_endpoints: [ep-office-01]
+home_endpoints: [ep-home-01]
+outside_host: probe        # a machine on the internet, outside the company
+
+rdp_host: lb.lab.example.com
+genesys_org_url: https://apps.mypurecloud.com
+chrome_expected: ${CHROME_INSTALL:-true}
+
+users:
+  agent:    {username: agent1, password: "${AGENT_PASSWORD}"}
+  agent_b:  {username: agent2, password: "${AGENT_PASSWORD}"}
+  outsider: {username: outsider1, password: "${AGENT_PASSWORD}"}
+
+# Expired-password test: the sim creates a throwaway user on the Samba DC.
+password_test:
+  mode: samba
+  dc_host: dc
+  group: CC-Agents-Test
+
+portal:
+  url: https://172.30.0.70
+  public_ip: 172.30.0.70
+  verify_tls: false
+  data_source: postgresql
+  group_name: CC Desktop
+  open_ports: [80, 443]
+  psql: psql -U guacamole_user -d guacamole_db -At -c
+  psql_host: guac-db
+  recordings_host: guacd
+  recordings_path: /var/lib/guacamole/recordings
+  fail2ban_jail: guacamole-portal
+
+# Internal addresses that must NOT be reachable from the internet
+internal_targets: ["10.10.0.10:389", "10.10.0.21:3389", "10.10.0.30:3389", "10.10.0.40:8080", "10.10.0.42:5432"]
+
+vpn:
+  interface: wg0
+  internal_probe: 10.10.0.10:389       # AD LDAP through the tunnel
+  gateway_internet_ip: 172.30.0.60
+  internal_subnet: 10.10.0.0/24
+
+# Genesys Cloud: must be reachable from every endpoint, and from home NOT via the tunnel
+genesys_probe:
+  ep-office-01: http://10.10.0.200/
+  ep-home-01: http://172.30.0.200/
+genesys_direct_ip: 172.30.0.200
+
+apps_file: apps.sim.yml
+ansible_inventory: ansible/inventories/sim/hosts.yml

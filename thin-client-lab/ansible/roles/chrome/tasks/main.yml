@@ -1,0 +1,31 @@
+# Ubuntu 24.04 ships Chromium/Firefox only as snaps, which behave badly on
+# multi-user xrdp hosts and lock-down setups. Google Chrome's .deb is used instead.
+- name: Google signing key
+  ansible.builtin.get_url:
+    url: https://dl.google.com/linux/linux_signing_key.pub
+    dest: /etc/apt/keyrings/google-chrome.asc
+    mode: "0644"
+  when: chrome_install | bool
+
+- name: Google Chrome apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main"
+    filename: google-chrome
+  when: chrome_install | bool
+
+- name: Install Google Chrome
+  ansible.builtin.apt:
+    name: google-chrome-stable
+  when: chrome_install | bool
+
+- name: Managed policy directory
+  ansible.builtin.file:
+    path: /etc/opt/chrome/policies/managed
+    state: directory
+    mode: "0755"
+
+- name: Managed Chrome policies (users cannot override)
+  ansible.builtin.copy:
+    content: "{{ chrome_policies | combine(chrome_extra_policies) | to_nice_json }}\n"
+    dest: /etc/opt/chrome/policies/managed/cc-policy.json
+    mode: "0644"

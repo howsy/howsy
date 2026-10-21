@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+[Interface]
+PrivateKey = {{ vpn_private_key }}
+Address = {{ vpn_address }}/32
+PostUp = /usr/local/sbin/cc-vpn-dns up %i
+PreDown = /usr/local/sbin/cc-vpn-dns down %i
+
+[Peer]
+PublicKey = {{ vpn_gateway_pubkey }}
+Endpoint = {{ vpn_gateway_endpoint }}
+# Split tunnel: only internal subnets. Genesys Cloud voice goes straight to the internet.
+AllowedIPs = {{ vpn_routed_subnets | join(', ') }}
+PersistentKeepalive = 25

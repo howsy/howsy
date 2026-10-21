@@ -1,0 +1,21 @@
+# Real lab on Proxmox + physical test devices. Copy to hosts.yml and adjust.
+# Run: ansible-playbook -i inventories/lab/hosts.yml site.yml --ask-vault-pass
+all:
+  vars:
+    ansible_user: ccadmin            # local admin created by the autoinstall image
+    ansible_become: true
+  children:
+    session_hosts:
+      hosts:
+        sh-01: {ansible_host: sh-01.yourdomain.local}
+        sh-02: {ansible_host: sh-02.yourdomain.local}
+    endpoints:
+      hosts:
+        ep-laptop-01: {}
+        ep-laptop-02: {}
+        ep-mini-01: {}
+        ep-mini-02: {}
+      children:
+        home_endpoints:
+          hosts:
+            ep-home-01: {vpn_address: 10.99.0.10}

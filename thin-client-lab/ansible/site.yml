@@ -1,0 +1,17 @@
+# Configures every managed machine in the lab. Same playbook for the simulated
+# lab (inventories/sim) and the real Proxmox lab (inventories/lab).
+- name: Session hosts (lab steps 3-5)
+  hosts: session_hosts
+  become: true
+  roles: [common, ad_member, chrome, session_host]
+
+# A home endpoint only reaches AD through the tunnel, so the VPN goes on first.
+- name: Home endpoints - always-on VPN (lab step 9)
+  hosts: home_endpoints
+  become: true
+  roles: [common, home_vpn]
+
+- name: Endpoint golden image (lab step 7)
+  hosts: endpoints
+  become: true
+  roles: [common, ad_member, chrome, endpoint]

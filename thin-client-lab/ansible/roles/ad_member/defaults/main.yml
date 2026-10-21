@@ -1,0 +1,3 @@
+ad_server: ""                 # empty: discover domain controllers through DNS SRV records
+ad_allowed_groups: [CC-Agents-Test]
+ad_dyndns_update: true

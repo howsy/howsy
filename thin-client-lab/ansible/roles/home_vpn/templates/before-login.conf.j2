@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+[Unit]
+Wants=network-online.target
+After=network-online.target
+# Nobody can log in until the tunnel is up, so AD login works as in the office.
+Before=systemd-user-sessions.service display-manager.service
+{% if is_container %}
+
+[Service]
+Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
+Environment=WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1
+{% endif %}

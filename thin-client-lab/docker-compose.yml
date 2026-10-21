@@ -1,0 +1,193 @@
+# Simulated test lab for the call-center thin-client design.
+# One container per lab VM / device from the design's resources table.
+#
+#   corp     10.10.0.0/24   office / data-center network
+#   internet 172.30.0.0/24  "the internet": home endpoint, DMZ face of the proxy,
+#                           VPN gateway, Genesys Cloud stand-in, outside probe
+name: cclab
+
+x-managed-node: &managed-node
+  # Built once by `make up` (not by compose --build): rebuilding would recreate
+  # the machines and throw away what Ansible configured on them.
+  image: cclab/managed-node
+  pull_policy: never
+  privileged: true            # systemd inside the container
+  cgroup: host
+  tmpfs: [/run, /run/lock]
+  restart: unless-stopped
+  depends_on:
+    dc: {condition: service_healthy}
+
+networks:
+  corp:
+    ipam: {config: [{subnet: 10.10.0.0/24}]}
+  internet:
+    ipam: {config: [{subnet: 172.30.0.0/24}]}
+
+volumes:
+  dc-data: {}
+  dc-etc: {}
+  homes: {}          # files-01 stand-in (see README: NFS is checked on the real lab)
+  guac-db: {}
+  recordings: {}
+
+services:
+  dc:
+    image: cclab/dc
+    build: images/dc
+    container_name: cclab-dc
+    hostname: dc01
+    privileged: true
+    env_file: .env
+    volumes: [dc-data:/var/lib/samba, dc-etc:/etc/samba]
+    networks: {corp: {ipv4_address: 10.10.0.10}}
+
+  sh-01:
+    <<: *managed-node
+    container_name: cclab-sh-01
+    hostname: sh-01
+    dns: [10.10.0.10]
+    dns_search: [lab.example.com]
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro, homes:/home]
+    networks: {corp: {ipv4_address: 10.10.0.21}}
+
+  sh-02:
+    <<: *managed-node
+    container_name: cclab-sh-02
+    hostname: sh-02
+    dns: [10.10.0.10]
+    dns_search: [lab.example.com]
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro, homes:/home]
+    networks: {corp: {ipv4_address: 10.10.0.22}}
+
+  lb:
+    image: haproxy:2.8
+    container_name: cclab-lb
+    restart: unless-stopped
+    volumes: [./config/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro]
+    networks: {corp: {ipv4_address: 10.10.0.30}}
+
+  guac-db:
+    image: postgres:16
+    container_name: cclab-guac-db
+    environment:
+      POSTGRES_DB: guacamole_db
+      POSTGRES_USER: guacamole_user
+      POSTGRES_PASSWORD: ${GUAC_DB_PASSWORD}
+    volumes: [guac-db:/var/lib/postgresql/data, ./.lab/guac-initdb:/docker-entrypoint-initdb.d:ro]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "guacamole_user", "-d", "guacamole_db"]
+      interval: 3s
+      retries: 30
+    networks: {corp: {ipv4_address: 10.10.0.42}}
+
+  recordings-init:
+    image: ubuntu:24.04
+    command: ["sh", "-c", "chown 1000:1000 /recordings && chmod 750 /recordings"]
+    volumes: [recordings:/recordings]
+    network_mode: none
+
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: cclab-guacd
+    healthcheck:   # the image's own check runs only every 5 minutes
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822"]
+      interval: 5s
+      retries: 20
+    volumes: [recordings:/var/lib/guacamole/recordings]
+    depends_on:
+      recordings-init: {condition: service_completed_successfully}
+    networks: {corp: {ipv4_address: 10.10.0.41}}
+
+  guac:
+    image: guacamole/guacamole:1.5.5
+    container_name: cclab-guac
+    depends_on:
+      guac-db: {condition: service_healthy}
+      dc: {condition: service_healthy}
+      guacd: {condition: service_started}
+    environment:
+      GUACD_HOSTNAME: guacd
+      POSTGRESQL_HOSTNAME: guac-db
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_USER: guacamole_user
+      POSTGRESQL_PASSWORD: ${GUAC_DB_PASSWORD}
+      # LDAP users need a DB row to store their TOTP key.
+      POSTGRESQL_AUTO_CREATE_ACCOUNTS: "true"
+      LDAP_HOSTNAME: 10.10.0.10
+      LDAP_PORT: "389"
+      LDAP_ENCRYPTION_METHOD: none          # production: ssl (LDAPS)
+      LDAP_USER_BASE_DN: OU=CallCenterTest,DC=lab,DC=example,DC=com
+      LDAP_USERNAME_ATTRIBUTE: sAMAccountName
+      LDAP_SEARCH_BIND_DN: svc-guac@lab.example.com
+      LDAP_SEARCH_BIND_PASSWORD: ${SVC_GUAC_PASSWORD}
+      LDAP_USER_SEARCH_FILTER: (&(objectClass=user)(memberOf=CN=CC-Agents-Test,OU=CallCenterTest,DC=lab,DC=example,DC=com))
+      LDAP_GROUP_BASE_DN: OU=CallCenterTest,DC=lab,DC=example,DC=com
+      LDAP_GROUP_NAME_ATTRIBUTE: cn
+      LDAP_GROUP_SEARCH_FILTER: (objectClass=group)
+      TOTP_ENABLED: "true"
+      TOTP_ISSUER: CC Remote Portal
+      REMOTE_IP_VALVE_ENABLED: "true"
+    networks: {corp: {ipv4_address: 10.10.0.40}}
+
+  proxy:
+    image: cclab/proxy
+    build: images/proxy
+    container_name: cclab-proxy
+    restart: unless-stopped
+    cap_add: [NET_ADMIN]       # fail2ban bans with iptables
+    environment:
+      F2B_IGNOREIP: 172.30.0.1   # the machine running the test suite
+    depends_on: [guac]
+    networks:
+      internet: {ipv4_address: 172.30.0.70}
+      corp: {ipv4_address: 10.10.0.70}
+
+  vpn-gw:
+    image: cclab/vpn-gw
+    build: images/vpn-gw
+    container_name: cclab-vpn-gw
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    sysctls: {net.ipv4.ip_forward: "1"}
+    volumes: [./.lab/vpn:/keys:ro]
+    networks:
+      internet: {ipv4_address: 172.30.0.60}
+      corp: {ipv4_address: 10.10.0.60}
+
+  crm:
+    image: nginx:1.27-alpine
+    container_name: cclab-crm
+    volumes: [./config/apps/crm:/usr/share/nginx/html:ro]
+    networks: {corp: {ipv4_address: 10.10.0.80}}
+
+  genesys-sim:
+    image: nginx:1.27-alpine
+    container_name: cclab-genesys-sim
+    volumes: [./config/apps/genesys-sim:/usr/share/nginx/html:ro]
+    networks:
+      internet: {ipv4_address: 172.30.0.200}
+      corp: {ipv4_address: 10.10.0.200}   # the office reaches the internet too
+
+  ep-office-01:
+    <<: *managed-node
+    container_name: cclab-ep-office-01
+    hostname: ep-office-01
+    dns: [10.10.0.10]
+    dns_search: [lab.example.com]
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro]
+    networks: {corp: {ipv4_address: 10.10.0.50}}
+
+  ep-home-01:
+    <<: *managed-node
+    container_name: cclab-ep-home-01
+    hostname: ep-home-01
+    # At home the device only has the internet. AD, DNS and internal apps come via the VPN.
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro]
+    networks: {internet: {ipv4_address: 172.30.0.100}}
+
+  probe:
+    image: cclab/probe
+    build: images/probe
+    container_name: cclab-probe
+    networks: {internet: {ipv4_address: 172.30.0.150}}

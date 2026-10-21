@@ -1,0 +1,8 @@
+- name: Detect whether this machine is a container (simulated lab)
+  ansible.builtin.set_fact:
+    is_container: "{{ ansible_virtualization_type in ['docker', 'container', 'podman', 'lxc'] }}"
+
+- name: Refresh apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600

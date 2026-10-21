@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[org/gnome/desktop/session]
+idle-delay=uint32 {{ idle_lock_seconds }}
+
+[org/gnome/desktop/screensaver]
+lock-enabled=true
+lock-delay=uint32 0
+
+[org/gnome/desktop/lockdown]
+disable-user-switching=true

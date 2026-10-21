@@ -1,0 +1,38 @@
+# Lab step 9: VPN that starts at boot, before anyone can log in, with split tunnelling.
+- name: WireGuard tools
+  ansible.builtin.apt:
+    name: "{{ ['wireguard-tools'] + (['wireguard-go'] if is_container else []) }}"
+    install_recommends: false
+
+- name: Tunnel DNS helper
+  ansible.builtin.template:
+    src: cc-vpn-dns.j2
+    dest: /usr/local/sbin/cc-vpn-dns
+    mode: "0755"
+
+- name: Tunnel configuration
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: /etc/wireguard/wg0.conf
+    mode: "0600"
+  notify: Restart VPN
+
+- name: Drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/wg-quick@wg0.service.d
+    state: directory
+    mode: "0755"
+
+- name: VPN comes up before the login screen
+  ansible.builtin.template:
+    src: before-login.conf.j2
+    dest: /etc/systemd/system/wg-quick@wg0.service.d/cc-before-login.conf
+    mode: "0644"
+  notify: Restart VPN
+
+- name: VPN enabled at boot
+  ansible.builtin.systemd_service:
+    name: wg-quick@wg0
+    enabled: true
+    state: started
+    daemon_reload: true

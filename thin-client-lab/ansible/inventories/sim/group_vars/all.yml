@@ -1,0 +1,21 @@
+ad_domain: lab.example.com
+ad_realm: LAB.EXAMPLE.COM
+ad_join_user: Administrator
+ad_join_password: "{{ lookup('env', 'ADMIN_PASSWORD') }}"
+ad_computer_ou: OU=Computers,OU=CallCenterTest,DC=lab,DC=example,DC=com
+ad_allowed_groups: [CC-Agents-Test]
+
+rdp_host: lb.lab.example.com
+genesys_org_url: https://apps.mypurecloud.com
+
+# Simulation specifics
+home_share_type: none          # the containers share a volume; the real lab uses nfs
+chrome_install: "{{ lookup('env', 'CHROME_INSTALL') | default('true', true) | bool }}"
+lab_test_tools: true      # xvfb/pamtester so the test suite can drive the endpoint
+
+vpn_gateway_endpoint: 172.30.0.60:51820
+vpn_gateway_pubkey: "{{ lookup('file', inventory_dir + '/../../../.lab/vpn/gateway.pub') }}"
+vpn_private_key: "{{ lookup('file', inventory_dir + '/../../../.lab/vpn/' + inventory_hostname + '.key') }}"
+vpn_routed_subnets: [10.10.0.0/24]
+vpn_dns_server: 10.10.0.10
+vpn_dns_mode: resolvconf       # docker owns resolv.conf; real endpoints use systemd-resolved

@@ -1,0 +1,26 @@
+ad_domain: yourdomain.local
+ad_realm: YOURDOMAIN.LOCAL
+ad_join_user: svc-adjoin
+ad_join_password: "{{ vault_ad_join_password }}"     # ansible-vault
+ad_computer_ou: OU=Computers,OU=CallCenterTest,DC=yourdomain,DC=local
+ad_allowed_groups: [CC-Agents-Test]
+
+rdp_host: rdp.yourdomain.local                        # keepalived VIP of the HAProxy pair
+genesys_org_url: https://apps.mypurecloud.ie          # your Genesys Cloud region
+
+home_share_type: nfs
+nfs_server: files-01.yourdomain.local
+nfs_export: /export/home
+nfs_sec: krb5
+
+chrome_install: true
+lab_test_tools: true    # set false when building the production image
+
+# If the existing firewall VPN is used instead of WireGuard, drop the home_vpn play
+# and keep only the test checks in tests/test_07_home_vpn.py.
+vpn_gateway_endpoint: vpn.yourdomain.com:51820
+vpn_gateway_pubkey: "<gateway public key>"
+vpn_private_key: "{{ vault_vpn_keys[inventory_hostname] }}"
+vpn_routed_subnets: [10.10.0.0/16]                     # internal subnets + Engage servers
+vpn_dns_server: 10.10.0.10
+vpn_dns_mode: resolved

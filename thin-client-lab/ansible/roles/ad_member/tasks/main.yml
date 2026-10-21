@@ -1,0 +1,54 @@
+# Lab step 3. Equivalent to `realm join` + `realm deny --all` + `realm permit -g`,
+# written out explicitly so it is repeatable and does not need realmd/packagekit.
+- name: Install AD client packages
+  ansible.builtin.apt:
+    name: [sssd, sssd-ad, sssd-tools, libnss-sss, libpam-sss, adcli, krb5-user, libsasl2-modules-gssapi-mit]
+    state: present
+  environment: {DEBIAN_FRONTEND: noninteractive}
+
+- name: Kerberos client configuration
+  ansible.builtin.template:
+    src: krb5.conf.j2
+    dest: /etc/krb5.conf
+    mode: "0644"
+
+- name: Check for an existing, valid domain join
+  ansible.builtin.command: adcli testjoin --domain {{ ad_domain }}
+  register: ad_testjoin
+  changed_when: false
+  failed_when: false
+
+- name: Join the domain
+  ansible.builtin.command: >-
+    adcli join --domain {{ ad_domain }} --domain-ou "{{ ad_computer_ou }}"
+    --login-user {{ ad_join_user }} --stdin-password
+    --host-fqdn {{ ansible_hostname }}.{{ ad_domain }}
+  args:
+    stdin: "{{ ad_join_password }}"
+  when: ad_testjoin.rc != 0
+
+- name: SSSD configuration (only members of the allowed groups may log in)
+  ansible.builtin.template:
+    src: sssd.conf.j2
+    dest: /etc/sssd/sssd.conf
+    mode: "0600"
+  notify: Restart sssd
+
+- name: Check whether home directories are created on first login
+  ansible.builtin.command: grep -q pam_mkhomedir /etc/pam.d/common-session
+  register: ad_mkhomedir
+  changed_when: false
+  failed_when: false
+
+- name: Create home directories on first login
+  ansible.builtin.command: pam-auth-update --enable mkhomedir
+  when: ad_mkhomedir.rc != 0
+
+- name: SSSD running and enabled
+  ansible.builtin.systemd_service:
+    name: sssd
+    state: started
+    enabled: true
+
+- name: Apply configuration changes now
+  ansible.builtin.meta: flush_handlers

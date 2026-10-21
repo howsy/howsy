@@ -1,0 +1,14 @@
+# Fill in during the lab phase ("What is the full list of apps agents use besides Genesys?").
+apps:
+  - name: CRM
+    url: https://crm.yourdomain.local/
+    expect: Login
+    where: [session_hosts, office_endpoints, home_endpoints]
+  - name: Genesys Engage Workspace Web Edition
+    url: https://wwe.yourdomain.local/ui/ad/v1/index.html
+    expect: Workspace
+    where: [office_endpoints, home_endpoints]
+  - name: Knowledge base
+    url: https://kb.yourdomain.local/
+    expect: ""
+    where: [session_hosts]

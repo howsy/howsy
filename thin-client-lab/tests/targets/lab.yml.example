@@ -1,0 +1,73 @@
+# Targets for the REAL lab (Proxmox VMs + physical test devices).
+# Copy to lab.yml, fill in, then:  LAB_TARGETS=tests/targets/lab.yml pytest tests
+# The test machine needs SSH (key-based, sudo) to every host listed here.
+mode: lab
+domain: yourdomain.local
+
+hosts:
+  sh-01: ssh://ccadmin@sh-01.yourdomain.local?sudo=true
+  sh-02: ssh://ccadmin@sh-02.yourdomain.local?sudo=true
+  lb: ssh://ccadmin@lb-01.yourdomain.local?sudo=true
+  guac-db: ssh://ccadmin@guac-01.yourdomain.local?sudo=true
+  guacd: ssh://ccadmin@guac-01.yourdomain.local?sudo=true
+  proxy: ssh://ccadmin@proxy-01.dmz.yourdomain.local?sudo=true
+  ep-laptop-01: ssh://ccadmin@ep-laptop-01.yourdomain.local?sudo=true
+  ep-mini-01: ssh://ccadmin@ep-mini-01.yourdomain.local?sudo=true
+  ep-home-01: ssh://ccadmin@10.99.0.10?sudo=true        # reached through its tunnel
+  outside: ssh://user@your-cloud-vm.example.com           # any VM outside the company
+
+tty_command: ssh -tt ccadmin@{host}.yourdomain.local sudo
+# Host-failure test: power the VM off/on through Proxmox (adjust VM ids)
+power_off: ssh root@pve-01 qm stop {vmid}
+power_on: ssh root@pve-01 qm start {vmid}
+vmids: {sh-01: 101, sh-02: 102}
+
+session_hosts: [sh-01, sh-02]
+office_endpoints: [ep-laptop-01, ep-mini-01]
+home_endpoints: [ep-home-01]
+outside_host: outside
+
+rdp_host: rdp.yourdomain.local
+genesys_org_url: https://apps.mypurecloud.ie
+chrome_expected: true
+
+users:
+  agent:    {username: cc.test1, password: "${AGENT_PASSWORD}"}
+  agent_b:  {username: cc.test2, password: "${AGENT_PASSWORD}"}
+  outsider: {username: cc.outsider, password: "${OUTSIDER_PASSWORD}"}
+
+# An AD admin ticks "User must change password at next logon" for this user before each run.
+password_test:
+  mode: prepared
+  username: cc.pwtest
+  password: "${PWTEST_PASSWORD}"
+
+portal:
+  url: https://remote.yourdomain.com
+  public_ip: 203.0.113.10
+  verify_tls: true
+  data_source: postgresql
+  group_name: CC Desktop
+  open_ports: [80, 443]
+  psql: sudo -u postgres psql -d guacamole_db -At -c
+  psql_host: guac-db
+  recordings_host: guacd
+  recordings_path: /var/lib/guacamole/recordings
+  fail2ban_jail: guacamole-portal
+
+internal_targets: ["203.0.113.10:3389", "203.0.113.10:8080", "203.0.113.10:22"]
+
+vpn:
+  interface: wg0
+  internal_probe: 10.10.0.10:389
+  gateway_internet_ip: 203.0.113.20
+  internal_subnet: 10.10.0.0/16
+
+genesys_probe:
+  ep-laptop-01: https://apps.mypurecloud.ie/
+  ep-mini-01: https://apps.mypurecloud.ie/
+  ep-home-01: https://apps.mypurecloud.ie/
+genesys_direct_ip: ""        # empty: resolved from genesys_org_url on the endpoint
+
+apps_file: apps.lab.yml
+ansible_inventory: ansible/inventories/lab/hosts.yml

@@ -1,0 +1,6 @@
+- name: Update dconf
+  ansible.builtin.command: dconf update
+
+- name: Update initramfs
+  ansible.builtin.command: update-initramfs -u
+  when: not is_container

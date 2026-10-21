@@ -1,0 +1,27 @@
+chrome_install: true
+genesys_org_url: https://apps.mypurecloud.com
+# Pages allowed to use the microphone, autoplay and notifications without a prompt
+genesys_url_patterns:
+  - "https://[*.]mypurecloud.com"
+  - "https://[*.]mypurecloud.ie"
+  - "https://[*.]mypurecloud.de"
+  - "https://[*.]pure.cloud"
+chrome_policies:
+  BrowserSignin: 0
+  SyncDisabled: true
+  BrowserGuestModeEnabled: false
+  BrowserAddPersonEnabled: false
+  IncognitoModeAvailability: 1
+  DeveloperToolsAvailability: 2
+  PasswordManagerEnabled: false
+  DownloadRestrictions: 3          # no downloads: no customer data on endpoints
+  PrintingEnabled: false
+  ExtensionInstallBlocklist: ["*"]
+  DefaultBrowserSettingEnabled: false
+  MetricsReportingEnabled: false
+  BackgroundModeEnabled: false
+  URLBlocklist: ["file://*", "javascript://*", "chrome://flags"]
+  AudioCaptureAllowedUrls: "{{ genesys_url_patterns }}"
+  AutoplayAllowlist: "{{ genesys_url_patterns }}"
+  NotificationsAllowedForUrls: "{{ genesys_url_patterns }}"
+chrome_extra_policies: {}

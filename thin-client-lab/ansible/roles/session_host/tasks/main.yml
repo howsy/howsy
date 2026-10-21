@@ -1,0 +1,78 @@
+# Lab steps 4-5: remote desktops with xrdp + XFCE, central home folders.
+- name: Install xrdp and XFCE
+  ansible.builtin.apt:
+    name: [xrdp, xorgxrdp, xfce4, xfce4-terminal, dbus-x11, xfonts-base, xauth]
+    install_recommends: false
+  environment: {DEBIAN_FRONTEND: noninteractive}
+
+- name: Test tooling (lab only)
+  ansible.builtin.apt:
+    name: [pamtester]
+  when: lab_test_tools | default(false) | bool
+
+- name: XFCE as the session for every new user
+  ansible.builtin.copy:
+    content: "xfce4-session\n"
+    dest: /etc/skel/.xsession
+    mode: "0644"
+
+- name: xrdp always starts XFCE (also for users whose home already exists)
+  ansible.builtin.copy:
+    src: startwm.sh
+    dest: /etc/xrdp/startwm.sh
+    mode: "0755"
+
+- name: xrdp may read the TLS key
+  ansible.builtin.user:
+    name: xrdp
+    groups: ssl-cert
+    append: true
+  notify: Restart xrdp
+
+- name: Allow Xorg to be started by xrdp sessions
+  ansible.builtin.copy:
+    content: "allowed_users=anybody\nneeds_root_rights=no\n"
+    dest: /etc/X11/Xwrapper.config
+    mode: "0644"
+
+- name: Session lockdown - xrdp channels
+  ansible.builtin.lineinfile:
+    path: /etc/xrdp/xrdp.ini
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+  loop: "{{ xrdp_channels | dict2items }}"
+  notify: Restart xrdp
+
+- name: Reconnect a user to their existing session even from a different screen size
+  ansible.builtin.lineinfile:
+    path: /etc/xrdp/sesman.ini
+    regexp: "^Policy="
+    line: "Policy=UB"
+  notify: Restart xrdp
+
+- name: No root logins over RDP
+  ansible.builtin.lineinfile:
+    path: /etc/xrdp/sesman.ini
+    regexp: "^AllowRootLogin="
+    line: "AllowRootLogin=false"
+  notify: Restart xrdp
+
+- name: NFS client
+  ansible.builtin.apt:
+    name: [nfs-common, autofs]
+  when: home_share_type == 'nfs'
+
+- name: Mount home folders from the file server
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: "\\s/home\\s"
+    line: "{{ nfs_server }}:{{ nfs_export }} /home nfs4 sec={{ nfs_sec }},_netdev,x-systemd.automount 0 0"
+  when: home_share_type == 'nfs'
+  notify: Reload systemd
+
+- name: xrdp running and enabled
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [xrdp-sesman, xrdp]

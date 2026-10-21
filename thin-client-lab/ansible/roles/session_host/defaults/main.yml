@@ -1,0 +1,12 @@
+home_share_type: nfs          # nfs | none
+nfs_server: files-01
+nfs_export: /export/home
+nfs_sec: krb5
+# xrdp virtual channels. Clipboard and drive/printer redirection stay off.
+xrdp_channels:
+  rdpdr: "false"      # drives, printers, smart cards
+  cliprdr: "false"    # clipboard
+  rdpsnd: "true"      # sound
+  drdynvc: "true"
+  rail: "false"
+  xrdpvr: "false"

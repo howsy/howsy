@@ -1,0 +1,10 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# Genesys Cloud web app in its own window: no tabs, no address bar.
+# A separate profile keeps it in its own Chrome process, so closing it ends the
+# process and the user service starts it again.
+exec /usr/bin/google-chrome \
+  --app={{ genesys_org_url }} \
+  --user-data-dir="$HOME/.config/cc-genesys" \
+  --class=CCGenesys \
+  --no-first-run --no-default-browser-check

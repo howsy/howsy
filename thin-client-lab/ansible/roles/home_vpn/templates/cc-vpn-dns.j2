@@ -1,0 +1,20 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# Sends lookups for the AD domain to the internal DNS server while the tunnel is up.
+set -e
+action=$1; iface=$2
+{% if vpn_dns_mode == 'resolved' %}
+if [ "$action" = up ]; then
+  resolvectl dns "$iface" {{ vpn_dns_server }}
+  resolvectl domain "$iface" "~{{ ad_domain }}"
+fi
+{% else %}
+# Simulation: docker manages resolv.conf, so swap it while the tunnel is up.
+if [ "$action" = up ]; then
+  [ -f /run/resolv.conf.pre-vpn ] || cp /etc/resolv.conf /run/resolv.conf.pre-vpn
+  printf 'nameserver {{ vpn_dns_server }}\nsearch {{ ad_domain }}\n' > /etc/resolv.conf
+elif [ -f /run/resolv.conf.pre-vpn ]; then
+  cat /run/resolv.conf.pre-vpn > /etc/resolv.conf
+  rm -f /run/resolv.conf.pre-vpn
+fi
+{% endif %}

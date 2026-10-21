@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Call Center Desktop
+Comment=Apps from the session-host farm
+Exec=/usr/local/bin/cc-desktop
+Icon=org.remmina.Remmina
+Categories=Network;RemoteAccess;

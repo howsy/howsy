@@ -1,0 +1,2 @@
+vpn_dns_mode: resolved      # resolved (systemd-resolved split DNS) | resolvconf
+vpn_routed_subnets: []      # only these go through the tunnel; Genesys Cloud goes direct

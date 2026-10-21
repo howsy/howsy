@@ -1,0 +1,4 @@
+rdp_host: rdp.example.local
+genesys_org_url: https://apps.mypurecloud.com
+idle_lock_seconds: 600
+lab_test_tools: false

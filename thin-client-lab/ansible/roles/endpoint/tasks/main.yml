@@ -1,0 +1,103 @@
+# Lab step 7: endpoint golden image.
+- name: Endpoint packages (RDP client, desktop policy tools)
+  ansible.builtin.apt:
+    name: [kmod, remmina, remmina-plugin-rdp, freerdp3-x11, dconf-cli, dconf-gsettings-backend, gsettings-desktop-schemas, libglib2.0-bin, policykit-1]
+    install_recommends: false
+  environment: {DEBIAN_FRONTEND: noninteractive}
+
+- name: Test tooling (lab only)
+  ansible.builtin.apt:
+    name: [xvfb, xauth, pamtester, curl]
+    install_recommends: false
+  when: lab_test_tools | bool
+
+# --- Genesys Cloud in Chrome app mode ---------------------------------------
+- name: Genesys launcher
+  ansible.builtin.template:
+    src: cc-genesys.j2
+    dest: /usr/local/bin/cc-genesys
+    mode: "0755"
+
+- name: Genesys starts at login and comes back if the window is closed
+  ansible.builtin.copy:
+    src: cc-genesys.service
+    dest: /etc/systemd/user/cc-genesys.service
+    mode: "0644"
+
+- name: Enable Genesys for every user
+  ansible.builtin.command: systemctl --global enable cc-genesys.service
+  args:
+    creates: /etc/systemd/user/graphical-session.target.wants/cc-genesys.service
+
+# --- Shortcut to the session-host farm ---------------------------------------
+- name: Profile directory
+  ansible.builtin.file:
+    path: /etc/cc
+    state: directory
+    mode: "0755"
+
+- name: Remmina profile for the session-host farm
+  ansible.builtin.template:
+    src: cc-desktop.remmina.j2
+    dest: /etc/cc/cc-desktop.remmina
+    mode: "0644"
+
+- name: Desktop launcher script
+  ansible.builtin.copy:
+    src: cc-desktop
+    dest: /usr/local/bin/cc-desktop
+    mode: "0755"
+
+- name: Desktop menu entry
+  ansible.builtin.copy:
+    src: cc-desktop.desktop
+    dest: /usr/share/applications/cc-desktop.desktop
+    mode: "0644"
+
+# --- Lockdown ----------------------------------------------------------------
+- name: Block USB mass storage
+  ansible.builtin.copy:
+    src: cc-block-usb-storage.conf
+    dest: /etc/modprobe.d/cc-block-usb-storage.conf
+    mode: "0644"
+  notify: Update initramfs
+
+- name: Non-admins may not mount removable media
+  ansible.builtin.copy:
+    src: 50-cc-no-removable-mount.rules
+    dest: /etc/polkit-1/rules.d/50-cc-no-removable-mount.rules
+    mode: "0644"
+
+- name: Find sudo rules that grant domain users admin rights
+  ansible.builtin.shell: grep -rlE '^%(domain|lab|cc)' /etc/sudoers /etc/sudoers.d/ || true
+  register: _domain_sudo
+  changed_when: false
+
+- name: No admin rights for domain users
+  ansible.builtin.assert:
+    that: _domain_sudo.stdout == ""
+    fail_msg: "sudo rules for domain groups found: {{ _domain_sudo.stdout }}"
+
+- name: dconf directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: [/etc/dconf/profile, /etc/dconf/db/local.d/locks]
+
+- name: dconf profile
+  ansible.builtin.copy:
+    content: "user-db:user\nsystem-db:local\n"
+    dest: /etc/dconf/profile/user
+    mode: "0644"
+  notify: Update dconf
+
+- name: Screen locks after idle, users cannot change it
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - {src: dconf-lockdown.j2, dest: /etc/dconf/db/local.d/00-cc-lockdown}
+    - {src: dconf-locks.j2, dest: /etc/dconf/db/local.d/locks/00-cc-lockdown}
+  notify: Update dconf

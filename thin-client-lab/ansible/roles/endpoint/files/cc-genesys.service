@@ -1,0 +1,12 @@
+[Unit]
+Description=Genesys Cloud agent window
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/local/bin/cc-genesys
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
