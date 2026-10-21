@@ -24,3 +24,10 @@ vpn_private_key: "{{ vault_vpn_keys[inventory_hostname] }}"
 vpn_routed_subnets: [10.10.0.0/16]                     # internal subnets + Engage servers
 vpn_dns_server: 10.10.0.10
 vpn_dns_mode: resolved
+
+# Broker and management console (on broker-01)
+broker_url: https://broker-01.yourdomain.local:8443
+broker_spn: HTTP@broker-01.yourdomain.local
+broker_host_token: "{{ vault_broker_host_token }}"
+console_url: https://broker-01.yourdomain.local:8090
+console_device_token: "{{ vault_console_device_token }}"

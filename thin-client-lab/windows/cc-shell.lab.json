@@ -1,4 +1,5 @@
 {
+  "ConsoleUrl": "http://broker-01.lab.example.com:8090",
   "BrokerUrl": "http://broker-01.lab.example.com:8088",
   "RdpHost": "lb.lab.example.com",
   "Domain": "LAB",

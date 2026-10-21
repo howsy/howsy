@@ -119,13 +119,24 @@ All of this is inside the VM.
    ```bash
    ./lab.sh watch-laptop
    ```
-   This terminal now plays agent1's Windows laptop. It shows `listening for agent1's laptop commands`.
+   This terminal now plays agent1's Windows laptop. It shows `listening for laptop commands`.
 2. In the Remmina desktop, double-click **Genesys Cloud**.
 3. The terminal prints `starting genesys`, and on the next click `genesys already running: bring to
    front`. On a real Windows laptop, that's when the Genesys desktop app opens or comes to the front.
 4. Ctrl+C stops it.
 
 **Load balancer**: open **http://localhost:8404/** to see which session host each desktop went to.
+
+**Management console**: open **http://localhost:8090/** and sign in as `itadmin1` / `It-Admin-Pass1!`.
+- **Overview** shows every device, compliance and capacity.
+- **Sessions** lists every agent desktop. *Watch* shows it live; the agent sees a notice.
+- **Apps & desktop**: add a system, *Publish to pilot*, move `sh-01` to the pilot ring on its device
+  page, and watch its desktop gain the new icon. Then *Promote*, then *Roll back*.
+- **Activity** has the device timeline and the audit log.
+
+To see a laptop in the console, start the stand-in laptop:
+`docker exec cclab-ep-office-01 su - agent1 -c "printf %s 'Agent-Pass1!' | kinit agent1 && cc-laptop-session"`.
+It appears as `laptop-sim-01`. Details: [DASHBOARD.md](DASHBOARD.md).
 
 ## 8. Everyday commands
 

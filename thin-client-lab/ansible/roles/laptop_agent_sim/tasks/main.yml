@@ -24,6 +24,7 @@
       # Simulated laptop shell: the same steps windows/CC-Shell.ps1 runs after Windows logon.
       exec /usr/local/bin/cc-laptop-agent \
         --broker {{ broker_url }} --spn {{ broker_spn }} \
+        --console {{ console_url }} --device laptop-sim-01 \
         --rdp "xvfb-run -a xfreerdp3 /v:{{ rdp_host }} /u:{user} /p:{password} /cert:ignore /size:1280x800 /log-level:ERROR /t:cc-viewer-$(id -un)" \
         --app "genesys={{ genesys_local_command }}"
 

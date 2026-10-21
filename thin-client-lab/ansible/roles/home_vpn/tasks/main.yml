@@ -30,9 +30,28 @@
     mode: "0644"
   notify: Restart VPN
 
+- name: TUN device for the userspace WireGuard fallback (simulation)
+  ansible.builtin.shell: |
+    [ -c /dev/net/tun ] && exit 0
+    mkdir -p /dev/net && mknod /dev/net/tun c 10 200 && chmod 666 /dev/net/tun && echo created
+  register: _tun
+  changed_when: "'created' in _tun.stdout"
+  when: is_container
+
 - name: VPN enabled at boot
-  ansible.builtin.systemd_service:
-    name: wg-quick@wg0
-    enabled: true
-    state: started
-    daemon_reload: true
+  block:
+    - name: VPN enabled at boot
+      ansible.builtin.systemd_service:
+        name: wg-quick@wg0
+        enabled: true
+        state: started
+        daemon_reload: true
+  rescue:
+    - name: Why the tunnel did not start
+      ansible.builtin.command: journalctl -u wg-quick@wg0 --no-pager -n 25
+      register: _wg_journal
+      changed_when: false
+
+    - name: Report the tunnel error
+      ansible.builtin.fail:
+        msg: "wg-quick@wg0 did not start. Its log:\n{{ _wg_journal.stdout }}"

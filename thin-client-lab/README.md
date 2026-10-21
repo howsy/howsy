@@ -26,6 +26,11 @@ A test kit for the "Call Center Thin-Client & Remote Access Solution" design. It
 Option A adds a small broker service (`services/cc_broker.py`) for the single sign-on and the
 "open Genesys on my laptop" commands. Both options use the same session hosts, AD, portal and VPN.
 
+A **management console** ([`docs/DASHBOARD.md`](docs/DASHBOARD.md)) runs the fleet: inventory and
+compliance for every device, remote actions, a live view of agents' desktops and laptops with a
+timeline of what happened on each device, sessions per server, and the agent desktop's app catalog
+published by ring with rollback.
+
 The suite cannot judge calls, headsets or real hardware, so [`docs/MANUAL_TESTS.md`](docs/MANUAL_TESTS.md)
 holds step-by-step manual tests and a results sheet for those. `tools/` has two scripts for the pilot
 measures.
@@ -68,6 +73,7 @@ Once `all` (or `up` then `provision`) has finished:
 | A user who must be refused | same page | `outsider1` / `Agent-Pass1!` (a real AD account outside `CC-Agents-Test`) |
 | Session-host desktop, the way office endpoints open it | Remote Desktop (`mstsc` on Windows, Microsoft Remote Desktop on Mac, Remmina on Linux) to **localhost:13389** | `agent1` / `Agent-Pass1!` |
 | Load balancer: which host each session went to | **http://localhost:8404/** | none |
+| **Management console**: devices, compliance, live view, sessions, apps ([guide](docs/DASHBOARD.md)) | **http://localhost:8090/** | `itadmin1` / `It-Admin-Pass1!` |
 
 **Watch the laptop react in real time:** run `./lab.sh watch-laptop` (`.\lab.ps1 watch-laptop`) in a
 second terminal. It plays agent1's laptop. Then RDP to localhost:13389 as agent1 and double-click
@@ -119,10 +125,11 @@ against an Ubuntu Desktop 24.04 virtual machine (VirtualBox, Hyper-V) using `ans
 | USB storage blocked, no admin rights | `test_09_endpoint_lockdown`: `usb-storage`/`uas` resolve to `/bin/false`, udisks mount denied by polkit, agent has no sudo, idle screen lock set and locked, Chrome policies (no downloads, DevTools, incognito, extensions) | U-1 … U-4, D-1 |
 | Golden image deploys without manual steps | `lab.sh golden-image` (bare device → one playbook run → endpoint tests pass); `test_10`: re-running the image changes nothing | I-1 |
 | Windows laptop as viewer (option A) | `test_11_viewer`: ticket needs Kerberos, refused outside the group, single-use and bound to its user, AD passwords never sent to the broker; laptop login opens the desktop with a ticket and Genesys starts on the laptop by itself; the session's Genesys icon brings it forward on the agent's own laptop only; only allow-listed apps; closing the desktop ends the laptop session; icon per catalog system, Chrome tabs/bookmarks, no terminal/shutdown for agents, per-user CPU/RAM cap | W-1 … W-9 |
+| Management console | `test_12_console`: only CC-Admins sign in, CSRF and device-token checks, every machine reports and servers are compliant, sessions linked to laptops, live view of agent desktop and laptop (audited), message, start Genesys, timeline, allow-listed actions only, log off, catalog pilot → promote → rollback | — |
 | Pilot: call quality, login time, per-user sizing | `tools/genesys_call_quality.py` (MOS by group, from the Genesys Analytics API), `tools/sessionhost_usage.py` | L-1 … L-3 |
 
-Last full run in the simulation, from a clean start with `lab.sh`: **96 passed, 0 failed, 7 skipped**
-(17 of them are the Windows-viewer flow). The skips are the Chrome install check (×2, Chrome download
+Last full run in the simulation, from a clean start with `lab.sh`: **110 passed, 0 failed, 7 skipped**
+(17 of them are the Windows-viewer flow, 14 the management console). The skips are the Chrome install check (×2, Chrome download
 blocked in that environment) and five `lab_only` checks: NFS mount ×2, disk encryption, `lsmod` ×2.
 
 ## What the simulation does not prove
@@ -208,7 +215,8 @@ ansible/                  site.yml, roles (ad_member, session_host, chrome, endp
 tests/                    pytest suite, targets/{sim.yml,lab.yml.example}, app inventories
 docs/MANUAL_TESTS.md      manual test scripts and results sheet
 docs/screenshots/         what the portal and desktop look like
-services/                 cc-broker, session-host helpers, Linux reference laptop agent
+services/                 cc-broker, cc-console (+ console-ui), cc-device-agent, desktop renderer,
+                          session-host helpers, Linux reference laptop agent
 windows/                  option A: CC-Shell.ps1, cc-shell.json, installer, Group Policy steps
 tools/                    genesys_call_quality.py, sessionhost_usage.py, connect-laptop.sh
 ```

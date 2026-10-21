@@ -1,0 +1,5 @@
+- name: Restart cc-device-agent
+  ansible.builtin.systemd_service:
+    name: cc-device-agent
+    state: restarted
+    daemon_reload: true

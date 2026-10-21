@@ -56,6 +56,14 @@ add_a files   10.10.0.20
 add_a crm     10.10.0.80   # sample internal web app from the app inventory
 add_a vpn     10.10.0.60
 add_a broker-01 10.10.0.25 # cc-broker (SSO tickets, open-on-laptop)
+# IT admins who may use the management console (added to existing domains too).
+ITADMIN_PASSWORD=${ITADMIN_PASSWORD:-It-Admin-Pass1!}
+samba-tool group show CC-Admins >/dev/null 2>&1 || samba-tool group add CC-Admins --groupou="OU=CallCenterTest"
+if ! samba-tool user show itadmin1 >/dev/null 2>&1; then
+  samba-tool user create itadmin1 "$ITADMIN_PASSWORD" --userou="OU=CallCenterTest" --given-name=IT --surname=Admin
+  samba-tool user setexpiry itadmin1 --noexpiry
+  samba-tool group addmembers CC-Admins itadmin1
+fi
 touch /run/dc-seeded
 echo ">> domain controller ready"
 wait "$SAMBA_PID"

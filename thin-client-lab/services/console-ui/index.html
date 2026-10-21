@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Call Center Console</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="login-form" class="login-card">
+      <div class="brand big">☎ Call Center Console</div>
+      <p class="muted">Sign in with your AD account (members of CC-Admins).</p>
+      <label>Username <input name="username" autocomplete="username" required placeholder="itadmin1"></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Sign in</button>
+      <p id="login-error" class="error"></p>
+    </form>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside class="nav">
+      <div class="brand">☎ CC Console</div>
+      <a href="#/overview" data-page="overview">Overview</a>
+      <a href="#/devices" data-page="devices">Devices</a>
+      <a href="#/sessions" data-page="sessions">Sessions</a>
+      <a href="#/apps" data-page="apps">Apps &amp; desktop</a>
+      <a href="#/activity" data-page="activity">Activity</a>
+      <div class="nav-foot">
+        <span id="me" class="muted"></span>
+        <button id="logout" class="link">Sign out</button>
+      </div>
+    </aside>
+    <main id="main"></main>
+  </div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h3 id="modal-title"></h3><button id="modal-close" class="link">Close ✕</button></div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>

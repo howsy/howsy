@@ -62,6 +62,7 @@ $checks = @(
   @{ Name = 'AD: SMB';             Host = $Dc;          Port = 445 },
   @{ Name = 'AD: password change'; Host = $Dc;          Port = 464 },
   @{ Name = 'Broker';              Host = '10.10.0.25'; Port = 8088 },
+  @{ Name = 'Management console';  Host = '10.10.0.25'; Port = 8090 },
   @{ Name = 'Desktop farm (RDP)';  Host = '10.10.0.30'; Port = 3389 }
 )
 foreach ($c in $checks) {

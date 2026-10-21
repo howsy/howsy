@@ -27,3 +27,7 @@ broker_host_token: "{{ lookup('file', inventory_dir + '/../../../.lab/broker-tok
 
 # Agent desktop: one icon / tab / bookmark per system. Same list the tests check.
 cc_systems: "{{ (lookup('file', inventory_dir + '/../../../tests/apps.sim.yml') | from_yaml).apps }}"
+
+# Management console (dashboard) and the agents that report to it
+console_url: http://broker-01.lab.example.com:8090
+console_device_token: "{{ lookup('file', inventory_dir + '/../../../.lab/console-token') }}"

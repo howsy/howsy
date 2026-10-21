@@ -80,3 +80,10 @@ viewer:
   broker_url: http://broker-01.lab.example.com:8088
   laptop: ep-office-01          # stands in for the agent's Windows laptop
   local_app: genesys
+
+# Management console
+console:
+  url: http://10.10.0.25:8090
+  host: broker-01
+  admin: {username: itadmin1, password: "${ITADMIN_PASSWORD:-It-Admin-Pass1!}"}
+  laptop_device: laptop-sim-01

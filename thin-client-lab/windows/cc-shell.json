@@ -1,4 +1,5 @@
 {
+  "ConsoleUrl": "https://broker-01.yourdomain.local:8090",
   "BrokerUrl": "https://broker-01.yourdomain.local:8443",
   "RdpHost": "rdp.yourdomain.local",
   "Domain": "YOURDOMAIN",

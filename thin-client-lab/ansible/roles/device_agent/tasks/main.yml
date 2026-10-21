@@ -1,0 +1,53 @@
+# cc-device-agent: reports this machine to cc-console and runs the admins' actions.
+- name: Tools for screen views and messages on session hosts
+  ansible.builtin.apt:
+    name: [imagemagick, libnotify-bin, xfce4-notifyd]
+    install_recommends: false
+  when: cc_device_role == 'session_host'
+
+- name: Config directory
+  ansible.builtin.file:
+    path: /etc/cc-console
+    state: directory
+    mode: "0750"
+
+- name: Agent configuration (root only, contains the enrollment token)
+  ansible.builtin.copy:
+    content: "{{ {'console_url': console_url, 'device_token': console_device_token, 'role': cc_device_role,
+                 'device': inventory_hostname, 'domain': ad_domain} | to_nice_json }}\n"
+    dest: /etc/cc-console/agent.json
+    mode: "0600"
+  notify: Restart cc-device-agent
+
+- name: Agent program
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../services/cc-device-agent.py"
+    dest: /usr/local/sbin/cc-device-agent
+    mode: "0755"
+  notify: Restart cc-device-agent
+
+- name: Agent service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/cc-device-agent.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Call-center device agent (reports to cc-console)
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      ExecStart=/usr/local/sbin/cc-device-agent
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart cc-device-agent
+
+- name: Agent running
+  ansible.builtin.systemd_service:
+    name: cc-device-agent
+    enabled: true
+    state: started
+    daemon_reload: true

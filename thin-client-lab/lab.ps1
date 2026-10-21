@@ -38,6 +38,7 @@ Lab is running. Try it like an agent would:
                      run ".\lab.ps1 watch-laptop" in another window, then double-click
                      "Genesys Cloud" on that desktop: the laptop starts / focuses Genesys
   HAProxy stats      http://localhost:8404/
+  Management console http://localhost:8090/   (itadmin1 / It-Admin-Pass1!)
 
 Passwords come from .env. The browser will warn about the self-signed certificate.
 "@

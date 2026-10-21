@@ -18,19 +18,33 @@
     state: directory
     mode: "0755"
 
-- name: Icon for each web system (opens it as a browser tab)
-  ansible.builtin.copy:
-    dest: "/usr/share/cc-desktop/cc-web-{{ item.name | lower | regex_replace('[^a-z0-9]+', '-') }}.desktop"
+- name: Catalog directory
+  ansible.builtin.file:
+    path: /etc/cc-desktop
+    state: directory
     mode: "0755"
-    content: |
-      [Desktop Entry]
-      Type=Application
-      Name={{ item.name }}
-      Icon={{ item.icon | default('applications-internet') }}
-      Exec=/usr/local/bin/cc-open {{ item.url }}
-      Terminal=false
-  loop: "{{ cc_systems }}"
-  loop_control: {label: "{{ item.name }}"}
+
+# The catalog of web systems is managed in cc-console (Apps & desktop) and
+# delivered by cc-device-agent. This seeds it once, for the first boot.
+- name: First catalog of web systems (cc-console takes over from here)
+  ansible.builtin.copy:
+    content: >-
+      {% set out = [] %}{% for s in cc_systems %}{% set _ = out.append({'name': s.name, 'url': s.url,
+      'icon': s.icon | default('applications-internet')}) %}{% endfor %}{{ {'version': 0, 'items': out} | to_nice_json }}
+    dest: /etc/cc-desktop/catalog.json
+    mode: "0644"
+    force: false
+
+- name: Desktop renderer (icon per system, browser tabs and bookmarks)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../services/cc-desktop-render"
+    dest: /usr/local/sbin/cc-desktop-render
+    mode: "0755"
+
+- name: Render the desktop from the catalog
+  ansible.builtin.command: /usr/local/sbin/cc-desktop-render
+  register: _render
+  changed_when: _render.stdout == 'changed'
 
 - name: Icon for each laptop app (starts it on the agent's own laptop)
   ansible.builtin.copy:
@@ -47,25 +61,19 @@
   loop: "{{ cc_local_apps }}"
   loop_control: {label: "{{ item.name }}"}
 
-- name: Find launchers no longer in the catalog
+- name: Find laptop-app launchers
   ansible.builtin.find:
     paths: /usr/share/cc-desktop
-    patterns: "cc-*.desktop"
+    patterns: "cc-local-*.desktop"
   register: _launchers
 
-- name: Remove launchers no longer in the catalog
+- name: Remove launchers of laptop apps no longer listed
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: absent
   loop: "{{ _launchers.files }}"
   loop_control: {label: "{{ item.path | basename }}"}
-  when: (item.path | basename) not in _wanted
-  vars:
-    _wanted: >-
-      {{ (cc_systems | map(attribute='name') | map('lower') | map('regex_replace', '[^a-z0-9]+', '-')
-          | map('regex_replace', '^', 'cc-web-') | map('regex_replace', '$', '.desktop') | list)
-       + (cc_local_apps | map(attribute='id') | map('regex_replace', '^', 'cc-local-')
-          | map('regex_replace', '$', '.desktop') | list) }}
+  when: (item.path | basename) not in (cc_local_apps | map(attribute='id') | map('regex_replace', '^(.*)$', 'cc-local-\\1.desktop') | list)
 
 - name: At login - icons on the desktop, browser with every system, laptop apps
   ansible.builtin.copy:
@@ -83,21 +91,6 @@
       name: Call-center laptop apps
       exec: "sh -c '{% for a in cc_local_apps if a.autostart | default(false) %}/usr/local/bin/cc-local-launch {{ a.id }}; {% endfor %}true'"
   loop_control: {label: "{{ item.file }}"}
-
-- name: Browser opens every system as a tab, with a bookmarks bar of all systems
-  ansible.builtin.copy:
-    dest: /etc/opt/chrome/policies/managed/cc-desktop.json
-    mode: "0644"
-    content: "{{ _policy | to_nice_json }}\n"
-  vars:
-    _policy:
-      RestoreOnStartup: 4
-      RestoreOnStartupURLs: "{{ cc_systems | map(attribute='url') | list }}"
-      HomepageLocation: "{{ (cc_systems | first).url if cc_systems else 'about:blank' }}"
-      ShowHomeButton: true
-      BookmarkBarEnabled: true
-      ManagedBookmarks: >-
-        {% set marks = [{'toplevel_name': 'Call Center'}] %}{% for sys in cc_systems %}{% set _ = marks.append({'name': sys.name, 'url': sys.url}) %}{% endfor %}{{ marks }}
 
 - name: Session start hook directory
   ansible.builtin.file:

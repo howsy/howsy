@@ -1,0 +1,2 @@
+console_port: 8090
+console_admin_group: cc-admins       # SSSD shows AD group names in lower case

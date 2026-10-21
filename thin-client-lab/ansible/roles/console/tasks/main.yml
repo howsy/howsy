@@ -1,0 +1,96 @@
+# cc-console: the management dashboard (runs on the broker host).
+- name: Service account
+  ansible.builtin.user:
+    name: cc-console
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: cc-console
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: /etc/cc-console, owner: root, mode: "0750"}
+    - {path: /var/lib/cc-console, owner: cc-console, mode: "0750"}
+    - {path: /usr/local/share/cc-console/ui, owner: root, mode: "0755"}
+
+- name: Keytab for Kerberos check-ins from laptops
+  ansible.builtin.copy:
+    src: /etc/krb5.keytab
+    remote_src: true
+    dest: /etc/cc-console/http.keytab
+    owner: root
+    group: cc-console
+    mode: "0640"
+  notify: Restart cc-console
+
+- name: First desktop catalog (used only when the console has none yet)
+  ansible.builtin.copy:
+    content: >-
+      {% set out = [] %}{% for s in cc_systems %}{% set _ = out.append({'name': s.name, 'url': s.url,
+      'icon': s.icon | default('applications-internet')}) %}{% endfor %}{{ out | to_nice_json }}
+    dest: /etc/cc-console/seed-catalog.json
+    mode: "0644"
+
+- name: Console configuration
+  ansible.builtin.copy:
+    content: "{{ {'port': console_port, 'realm': ad_realm, 'admin_group': console_admin_group,
+                 'device_token': console_device_token, 'db': '/var/lib/cc-console/console.db',
+                 'seed_catalog': '/etc/cc-console/seed-catalog.json',
+                 'ui_dir': '/usr/local/share/cc-console/ui'} | to_nice_json }}\n"
+    dest: /etc/cc-console/console.json
+    owner: root
+    group: cc-console
+    mode: "0640"
+  notify: Restart cc-console
+
+- name: Console program
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../services/cc_console.py"
+    dest: /usr/local/sbin/cc-console
+    mode: "0755"
+  notify: Restart cc-console
+
+- name: Console web interface
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../services/console-ui/{{ item }}"
+    dest: "/usr/local/share/cc-console/ui/{{ item }}"
+    mode: "0644"
+  loop: [index.html, app.js, style.css]
+
+- name: Console service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/cc-console.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Call-center management console
+      After=network-online.target sssd.service
+      Wants=network-online.target
+
+      [Service]
+      User=cc-console
+      Environment=KRB5_KTNAME=/etc/cc-console/http.keytab
+      Environment=KRB5CCNAME=MEMORY:
+      ExecStart=/usr/local/sbin/cc-console
+      Restart=always
+      NoNewPrivileges=true
+      ProtectSystem=strict
+      ReadWritePaths=/var/lib/cc-console
+      ProtectHome=true
+      PrivateTmp=true
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart cc-console
+
+- name: Console running
+  ansible.builtin.systemd_service:
+    name: cc-console
+    enabled: true
+    state: started
+    daemon_reload: true

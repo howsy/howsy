@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Renders the agent desktop from /etc/cc-desktop/catalog.json: one launcher per
+web system (opens it as a browser tab) and the browser policy that opens every
+system as a tab with a bookmarks bar. Used by Ansible and by cc-device-agent when
+the console publishes a new catalog version. Prints "changed" or "unchanged"."""
+import json
+import os
+import re
+
+CATALOG = "/etc/cc-desktop/catalog.json"
+LAUNCHERS = "/usr/share/cc-desktop"
+POLICY = "/etc/opt/chrome/policies/managed/cc-desktop.json"
+
+
+def slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def write(path, text):
+    try:
+        if open(path).read() == text:
+            return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w") as f:
+        f.write(text)
+    os.chmod(path + ".tmp", 0o755 if path.endswith(".desktop") else 0o644)
+    os.replace(path + ".tmp", path)
+    return True
+
+
+items = json.load(open(CATALOG))["items"]
+changed = False
+wanted = set()
+for it in items:
+    name = f"cc-web-{slug(it['name'])}.desktop"
+    wanted.add(name)
+    changed |= write(os.path.join(LAUNCHERS, name),
+                     "[Desktop Entry]\nType=Application\n"
+                     f"Name={it['name']}\nIcon={it.get('icon') or 'applications-internet'}\n"
+                     f"Exec=/usr/local/bin/cc-open {it['url']}\nTerminal=false\n")
+for f in os.listdir(LAUNCHERS):
+    if f.startswith("cc-web-") and f not in wanted:
+        os.remove(os.path.join(LAUNCHERS, f))
+        changed = True
+
+urls = [it["url"] for it in items]
+policy = {
+    "RestoreOnStartup": 4,
+    "RestoreOnStartupURLs": urls,
+    "HomepageLocation": urls[0] if urls else "about:blank",
+    "ShowHomeButton": True,
+    "BookmarkBarEnabled": True,
+    "ManagedBookmarks": [{"toplevel_name": "Call Center"}] + [{"name": it["name"], "url": it["url"]} for it in items],
+}
+changed |= write(POLICY, json.dumps(policy, indent=4, sort_keys=True) + "\n")
+print("changed" if changed else "unchanged")

@@ -1,0 +1,1 @@
+cc_device_role: endpoint      # session_host | broker | endpoint
