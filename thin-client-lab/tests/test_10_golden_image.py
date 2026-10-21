@@ -22,4 +22,15 @@ def test_playbook_is_idempotent_on_endpoints():
     assert r.returncode == 0, r.stdout[-3000:]
     recap = r.stdout[r.stdout.rindex("PLAY RECAP"):]
     changed = {h: int(n) for h, n in re.findall(r"^(\S+)\s+:.*changed=(\d+)", recap, re.M)}
-    assert changed and all(n == 0 for n in changed.values()), recap
+    assert changed and all(n == 0 for n in changed.values()), recap + "\nChanged tasks:\n" + changed_tasks(r.stdout)
+
+
+def changed_tasks(out):
+    """Names of the tasks that reported a change, with the hosts."""
+    task, found = None, []
+    for line in out.splitlines():
+        if line.startswith(("TASK [", "RUNNING HANDLER [")):
+            task = line.split("[", 1)[1].split("]", 1)[0]
+        elif line.startswith("changed:"):
+            found.append(f"  {task}: {line.split('[', 1)[1].split(']', 1)[0]}")
+    return "\n".join(found) or "  (none listed)"

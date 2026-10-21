@@ -5,6 +5,18 @@
   ansible.builtin.set_fact:
     chrome_do_install: "{{ (chrome_install | bool) and ansible_architecture == 'x86_64' }}"
 
+# Chrome's package and its daily cron job rewrite the apt source file themselves,
+# which fights with the task below (every run would report a change). This is
+# Chrome's documented switch to leave the repository to us.
+- name: Chrome leaves its apt source to Ansible
+  ansible.builtin.copy:
+    content: |
+      repo_add_once="false"
+      repo_reenable_on_distupgrade="false"
+    dest: /etc/default/google-chrome
+    mode: "0644"
+  when: chrome_do_install
+
 - name: Google signing key
   ansible.builtin.get_url:
     url: https://dl.google.com/linux/linux_signing_key.pub
