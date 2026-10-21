@@ -32,8 +32,13 @@ timeline of what happened on each device, sessions per server, and the agent des
 published by ring with rollback.
 
 The suite cannot judge calls, headsets or real hardware, so [`docs/MANUAL_TESTS.md`](docs/MANUAL_TESTS.md)
-holds step-by-step manual tests and a results sheet for those. `tools/` has two scripts for the pilot
+holds step-by-step manual tests and a results sheet for those. `tools/` has scripts for the pilot
 measures.
+
+The whole thing is **on-prem**: one Proxmox server (or an HA pair) hosts every VM, and the agents keep
+the laptops they already have as thin clients. [`docs/ON_PREM_SIZING.md`](docs/ON_PREM_SIZING.md) turns
+the per-user CPU/RAM the pilot measures into the server spec you have to buy — and shows why the device
+refresh is a server, not 200 new laptops.
 
 ## Run it on your computer
 
@@ -126,7 +131,7 @@ against an Ubuntu Desktop 24.04 virtual machine (VirtualBox, Hyper-V) using `ans
 | Golden image deploys without manual steps | `lab.sh golden-image` (bare device → one playbook run → endpoint tests pass); `test_10`: re-running the image changes nothing | I-1 |
 | Windows laptop as viewer (option A) | `test_11_viewer`: ticket needs Kerberos, refused outside the group, single-use and bound to its user, AD passwords never sent to the broker; laptop login opens the desktop with a ticket and Genesys starts on the laptop by itself; the session's Genesys icon brings it forward on the agent's own laptop only; only allow-listed apps; closing the desktop ends the laptop session; icon per catalog system, Chrome tabs/bookmarks, no terminal/shutdown for agents, per-user CPU/RAM cap | W-1 … W-9 |
 | Management console | `test_12_console`: only CC-Admins sign in, CSRF and device-token checks, every machine reports and servers are compliant, sessions linked to laptops, live view of agent desktop and laptop (audited), message, start Genesys, timeline, allow-listed actions only, log off, catalog pilot → promote → rollback | — |
-| Pilot: call quality, login time, per-user sizing | `tools/genesys_call_quality.py` (MOS by group, from the Genesys Analytics API), `tools/sessionhost_usage.py` | L-1 … L-3 |
+| Pilot: call quality, login time, per-user sizing | `tools/genesys_call_quality.py` (MOS by group, from the Genesys Analytics API), `tools/sessionhost_usage.py` (per-user CPU/RAM) → `tools/capacity_sizing.py` (server spec); `test_13_sizing` checks the math | L-1 … L-3 |
 
 Last full run in the simulation, from a clean start with `lab.sh`: **110 passed, 0 failed, 7 skipped**
 (17 of them are the Windows-viewer flow, 14 the management console). The skips are the Chrome install check (×2, Chrome download
@@ -214,9 +219,10 @@ config/                   haproxy.cfg, Guacamole seed SQL, sample internal app, 
 ansible/                  site.yml, roles (ad_member, session_host, chrome, endpoint, home_vpn), inventories
 tests/                    pytest suite, targets/{sim.yml,lab.yml.example}, app inventories
 docs/MANUAL_TESTS.md      manual test scripts and results sheet
+docs/ON_PREM_SIZING.md    the on-prem Proxmox server: VMs it hosts, CPU/RAM sizing from pilot numbers
 docs/screenshots/         what the portal and desktop look like
 services/                 cc-broker, cc-console (+ console-ui), cc-device-agent, desktop renderer,
                           session-host helpers, Linux reference laptop agent
 windows/                  option A: CC-Shell.ps1, cc-shell.json, installer, Group Policy steps
-tools/                    genesys_call_quality.py, sessionhost_usage.py, connect-laptop.sh
+tools/                    genesys_call_quality.py, sessionhost_usage.py, capacity_sizing.py, connect-laptop.sh
 ```
