@@ -64,6 +64,30 @@ if ! samba-tool user show itadmin1 >/dev/null 2>&1; then
   samba-tool user setexpiry itadmin1 --noexpiry
   samba-tool group addmembers CC-Admins itadmin1
 fi
+# More IT roles for the console (Owner = CC-Admins, Helpdesk, read-only Viewers).
+ensure_user() {   # ensure_user <name> <password> <group>
+  samba-tool user show "$1" >/dev/null 2>&1 || {
+    samba-tool user create "$1" "$2" --userou="OU=CallCenterTest"
+    samba-tool user setexpiry "$1" --noexpiry
+  }
+  samba-tool group show "$3" >/dev/null 2>&1 || samba-tool group add "$3" --groupou="OU=CallCenterTest"
+  samba-tool group listmembers "$3" | grep -qx "$1" || samba-tool group addmembers "$3" "$1"
+}
+ensure_user helpdesk1 "${HELPDESK_PASSWORD:-Helpdesk-Pass1!}" CC-Helpdesk
+ensure_user viewer1 "${VIEWER_PASSWORD:-Viewer-Pass1!}" CC-Viewers
+
+# svc-console may change the membership of the agents group, and nothing else
+# (the console's People page). WP on the "member" attribute of that one group.
+if ! samba-tool user show svc-console >/dev/null 2>&1; then
+  samba-tool user create svc-console "${SVC_CONSOLE_PASSWORD:-Svc-Console-Pass1!}" --userou="OU=CallCenterTest"
+  samba-tool user setexpiry svc-console --noexpiry
+fi
+SVC_SID=$(samba-tool user show svc-console --attributes=objectSid | sed -n 's/^objectSid: //p')
+AGENTS_DN="CN=CC-Agents-Test,$OU"
+if ! samba-tool dsacl get --objectdn="$AGENTS_DN" -H ldap://127.0.0.1 -U Administrator --password="$ADMIN_PASSWORD" 2>/dev/null | grep -q "$SVC_SID"; then
+  samba-tool dsacl set --objectdn="$AGENTS_DN" -H ldap://127.0.0.1 -U Administrator --password="$ADMIN_PASSWORD" \
+    --sddl="(OA;;WP;bf9679c0-0de6-11d0-a285-00aa003049e2;;$SVC_SID)"
+fi
 touch /run/dc-seeded
 echo ">> domain controller ready"
 wait "$SAMBA_PID"
