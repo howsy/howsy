@@ -174,12 +174,13 @@ def test_brute_force_is_rate_limited_then_banned(lab, cfg, portal):
     outside = lab.host(cfg["outside_host"])
     ip = portal.get("outside_ip") or outside.check_output("hostname -I").split()[0]
     url = f"https://{portal['public_ip']}/guacamole/api/tokens"
-    codes = outside.check_output(
-        "for i in $(seq 40); do curl -sk -o /dev/null -w '%{http_code} ' "
-        f"-d username=attacker -d password=guess$i {url}; done")
-    assert "429" in codes.split(), f"no rate limiting: {codes}"
     proxy = lab.host("proxy") if "proxy" in cfg["hosts"] else None
     try:
+        # Once banned, the remaining attempts cannot connect (curl prints 000).
+        codes = outside.run(
+            "for i in $(seq 40); do curl -sk -m 5 -o /dev/null -w '%{http_code} ' "
+            f"-d username=attacker -d password=guess$i {url}; done").stdout.split()
+        assert "429" in codes or "000" in codes, f"neither rate limited nor banned: {codes}"
         if proxy:
             wait_for(lambda: ip in proxy.check_output(
                 f"fail2ban-client status {portal['fail2ban_jail']}"), 30, what="fail2ban ban")

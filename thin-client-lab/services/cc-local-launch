@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""cc-local-launch APP - open APP (e.g. genesys) on the laptop this session is viewed from."""
+import socket
+import sys
+
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect("/run/cc-launch.sock")
+s.sendall(sys.argv[1].encode() + b"\n")
+reply = s.recv(256).decode().strip()
+print(reply)
+sys.exit(0 if reply == "ok" else 1)

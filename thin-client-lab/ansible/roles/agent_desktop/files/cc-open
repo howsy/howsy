@@ -1,0 +1,8 @@
+#!/bin/sh
+# Opens a call-center system as a tab in the agent's browser (starts it if needed).
+# Without a URL the browser opens every system from policy (RestoreOnStartupURLs).
+for b in google-chrome x-www-browser; do
+  command -v "$b" >/dev/null 2>&1 && exec "$b" "$@"
+done
+echo "cc-open: no browser installed" >&2
+exit 1

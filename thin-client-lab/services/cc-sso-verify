@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""pam_exec helper on session hosts (auth, expose_authtok).
+Accepts the login if the "password" is a valid one-time ticket from cc-broker.
+Ordinary passwords are never sent anywhere: they fall through to pam_sss."""
+import json
+import os
+import sys
+import urllib.request
+
+conf = json.load(open("/etc/cc-broker/client.json"))
+password = sys.stdin.buffer.read().split(b"\0")[0].decode(errors="replace").strip()
+if not password.startswith("ccsso-"):
+    sys.exit(1)
+req = urllib.request.Request(
+    conf["broker_url"] + "/sso/verify",
+    data=json.dumps({"user": os.environ.get("PAM_USER", ""), "password": password}).encode(),
+    headers={"Content-Type": "application/json", "X-CC-Host-Token": conf["host_token"]},
+)
+try:
+    with urllib.request.urlopen(req, timeout=5) as r:
+        sys.exit(0 if r.status == 200 else 1)
+except Exception:
+    sys.exit(1)

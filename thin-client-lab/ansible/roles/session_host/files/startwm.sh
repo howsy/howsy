@@ -6,4 +6,8 @@ if [ -r /etc/default/locale ]; then
   . /etc/default/locale
   export LANG LANGUAGE
 fi
+# Site hooks that prepare the desktop before XFCE starts (e.g. agent desktop).
+for hook in /etc/xrdp/startwm.d/*.sh; do
+  [ -r "$hook" ] && . "$hook"
+done
 exec /usr/bin/startxfce4

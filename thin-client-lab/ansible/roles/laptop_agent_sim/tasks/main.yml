@@ -1,0 +1,47 @@
+# Simulation only: a Linux stand-in for the agent's Windows laptop. It runs the
+# reference agent (services/cc-laptop-agent.py), which follows the same
+# protocol as windows/CC-Shell.ps1, so the server side is tested end to end.
+- name: Python Kerberos bindings, and tools to look at / click the laptop screen in tests
+  ansible.builtin.apt:
+    name: [python3-gssapi, xdotool, x11-apps, imagemagick]
+    install_recommends: false
+
+- name: Laptop agent and Genesys stand-in
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../services/{{ item.src }}"
+    dest: "/usr/local/bin/{{ item.dest }}"
+    mode: "0755"
+  loop:
+    - {src: cc-laptop-agent.py, dest: cc-laptop-agent}
+    - {src: genesys-desktop-sim, dest: genesys-desktop-sim}
+
+- name: What happens after the agent logs in to the laptop
+  ansible.builtin.copy:
+    dest: /usr/local/bin/cc-laptop-session
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # Simulated laptop shell: the same steps windows/CC-Shell.ps1 runs after Windows logon.
+      exec /usr/local/bin/cc-laptop-agent \
+        --broker {{ broker_url }} --spn {{ broker_spn }} \
+        --rdp "xvfb-run -a xfreerdp3 /v:{{ rdp_host }} /u:{user} /p:{password} /cert:ignore /size:1280x800 /log-level:ERROR /t:cc-viewer-$(id -un)" \
+        --app "genesys={{ genesys_local_command }}"
+
+- name: One-time ticket helper (troubleshooting and tests)
+  ansible.builtin.copy:
+    dest: /usr/local/bin/cc-sso-ticket
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # Prints a one-time login ticket for the current Kerberos user.
+      exec /usr/local/bin/cc-laptop-agent --broker {{ broker_url }} --spn {{ broker_spn }} --ticket-only
+
+- name: Listen-only laptop (lab.sh watch-laptop)
+  ansible.builtin.copy:
+    dest: /usr/local/bin/cc-laptop-listen
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # Shows, live, what the agent's laptop is asked to do from the server desktop.
+      exec /usr/local/bin/cc-laptop-agent --broker {{ broker_url }} --spn {{ broker_spn }} \
+        --app "genesys={{ genesys_local_command }}"

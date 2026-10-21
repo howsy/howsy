@@ -1,0 +1,13 @@
+#!/bin/sh
+# Runs at every login: puts the current call-center icons on the desktop (so a
+# catalog change reaches everyone) and marks them trusted so XFCE runs them.
+desk="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
+mkdir -p "$desk"
+rm -f "$desk"/cc-*.desktop
+for src in /usr/share/cc-desktop/cc-*.desktop; do
+  [ -e "$src" ] || continue
+  dst="$desk/$(basename "$src")"
+  cp "$src" "$dst"
+  chmod 755 "$dst"
+  gio set -t string "$dst" metadata::xfce-exe-checksum "$(sha256sum "$dst" | cut -d' ' -f1)" 2>/dev/null || true
+done

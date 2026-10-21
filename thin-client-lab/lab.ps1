@@ -1,6 +1,7 @@
 # Simulated call-center lab for Windows (Docker Desktop).
 #   powershell -ExecutionPolicy Bypass -File .\lab.ps1 all
 #   .\lab.ps1 up | provision | test | test-fast | golden-image | info | shell | down | clean
+#   .\lab.ps1 watch-laptop [user]   live view of what the agent's laptop is told to do
 param([string]$Command = "help", [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -34,6 +35,8 @@ Lab is running. Try it like an agent would:
                      user agent1 / Agent-Pass1!   (scan the QR code with any authenticator app)
                      user outsider1 is a real AD account that must be refused
   Session desktop    Remote Desktop (mstsc) to localhost:13389  (agent1 / Agent-Pass1!)
+                     run ".\lab.ps1 watch-laptop" in another window, then double-click
+                     "Genesys Cloud" on that desktop: the laptop starts / focuses Genesys
   HAProxy stats      http://localhost:8404/
 
 Passwords come from .env. The browser will warn about the self-signed certificate.
@@ -43,13 +46,18 @@ Passwords come from .env. The browser will warn about the self-signed certificat
 switch ($Command) {
   "up"           { Up }
   "provision"    { Ctl @("make", "provision", "ANSIBLE_ARGS=$extra") }
-  "test"         { Ctl @("make", "test", "PYTEST_ARGS=$extra") }
-  "test-fast"    { Ctl @("make", "test-fast", "PYTEST_ARGS=$extra") }
+  "test"         { Ctl @("make", "-s", "ssh-key"); Ctl (@("python3", "-m", "pytest", "tests") + $Rest) }
+  "test-fast"    { Ctl @("make", "-s", "ssh-key"); Ctl (@("python3", "-m", "pytest", "tests", "-m", "not slow") + $Rest) }
   "golden-image" { Run "docker" @("compose", "rm", "-sf", "ep-office-01"); Run "docker" @("compose", "up", "-d", "--wait", "ep-office-01"); Ctl @("make", "golden-provision") }
   "all"          { Up; Ctl @("make", "provision"); Ctl @("make", "test"); Info }
   "info"         { Info }
+  "watch-laptop" {
+    $user = if ($Rest) { $Rest[0] } else { "agent1" }
+    $pw = ((Get-Content .env | Where-Object { $_ -like "AGENT_PASSWORD=*" }) -replace '^AGENT_PASSWORD=', '')
+    docker compose exec ep-office-01 su - $user -c "printf '%s' '$pw' | kinit $user >/dev/null && cc-laptop-listen"
+  }
   "shell"        { docker compose exec controller bash }
   "down"         { docker compose down }
   "clean"        { $ErrorActionPreference = "Continue"; docker compose exec -T controller rm -rf /lab/.lab; docker compose down -v --remove-orphans }
-  default        { Get-Content $PSCommandPath -TotalCount 3 | Select-Object -Skip 1 }
+  default        { Get-Content $PSCommandPath -TotalCount 4 | Select-Object -Skip 1 }
 }

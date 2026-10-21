@@ -13,6 +13,19 @@ A test kit for the "Call Center Thin-Client & Remote Access Solution" design. It
    checklist. It runs against the simulation by default, or against the real lab with
    `LAB_TARGETS=tests/targets/lab.yml`.
 
+### Two ways to run the agents' laptops
+
+| | **A. Windows laptops as viewers** ([`windows/`](windows/README.md)) | B. Linux thin endpoints (`ansible/roles/endpoint`) |
+|---|---|---|
+| Laptop | your current laptop and Windows image, AD-joined | Ubuntu image on mini PCs or reused laptops |
+| What the agent sees | only the server desktop: Windows' own desktop is replaced | local desktop with Genesys in Chrome, plus RDP to the farm |
+| Genesys | **desktop app** on the laptop, started and focused from an icon on the server desktop | web app in Chrome app mode on the endpoint |
+| Login | AD once; the laptop gets a one-time ticket by Kerberos and opens the server desktop | AD on the endpoint, again for RDP |
+| Web systems | server desktop: icon per system, Chrome with every system as a tab, server CPU/RAM | same session hosts |
+
+Option A adds a small broker service (`services/cc_broker.py`) for the single sign-on and the
+"open Genesys on my laptop" commands. Both options use the same session hosts, AD, portal and VPN.
+
 The suite cannot judge calls, headsets or real hardware, so [`docs/MANUAL_TESTS.md`](docs/MANUAL_TESTS.md)
 holds step-by-step manual tests and a results sheet for those. `tools/` has two scripts for the pilot
 measures.
@@ -37,6 +50,7 @@ cd howsy/thin-client-lab
 | Run all tests / skip slow ones | `.\lab.ps1 test` / `test-fast` | `./lab.sh test` / `test-fast` |
 | Rebuild an endpoint from bare Ubuntu and re-test | `.\lab.ps1 golden-image` | `./lab.sh golden-image` |
 | Show the URLs and logins | `.\lab.ps1 info` | `./lab.sh info` |
+| Live view of what agent1's laptop is told to do | `.\lab.ps1 watch-laptop` | `./lab.sh watch-laptop` |
 | Shell inside the controller | `.\lab.ps1 shell` | `./lab.sh shell` |
 | Stop / delete everything | `.\lab.ps1 down` / `clean` | `./lab.sh down` / `clean` |
 
@@ -51,12 +65,22 @@ Once `all` (or `up` then `provision`) has finished:
 | Session-host desktop, the way office endpoints open it | Remote Desktop (`mstsc` on Windows, Microsoft Remote Desktop on Mac, Remmina on Linux) to **localhost:13389** | `agent1` / `Agent-Pass1!` |
 | Load balancer: which host each session went to | **http://localhost:8404/** | none |
 
+**Watch the laptop react in real time:** run `./lab.sh watch-laptop` (`.\lab.ps1 watch-laptop`) in a
+second terminal. It plays agent1's laptop. Then RDP to localhost:13389 as agent1 and double-click
+**Genesys Cloud** on the desktop. The terminal prints `starting genesys`, and on a second click
+`bring to front`. On a real Windows laptop, that's the moment the Genesys desktop app opens.
+
 In the portal, click **CC Desktop** (the name, not the `+`) to get a load-balanced desktop. Copy/paste
 in and out of the session is blocked on purpose. These ports listen on your computer only (127.0.0.1).
 
-| Portal login | Outsider refused | TOTP enrolment | Desktop in the browser |
+| Agent desktop (what the laptop shows) | Portal login | Outsider refused | TOTP enrolment |
 |---|---|---|---|
-| ![](docs/screenshots/1-portal-login.png) | ![](docs/screenshots/2-outsider-refused.png) | ![](docs/screenshots/3-totp-enrolment.png) | ![](docs/screenshots/5-desktop-in-browser.png) |
+| ![](docs/screenshots/6-laptop-viewer.png) | ![](docs/screenshots/1-portal-login.png) | ![](docs/screenshots/2-outsider-refused.png) | ![](docs/screenshots/3-totp-enrolment.png) |
+
+The agent desktop has an icon per web system from the catalog (`tests/apps.sim.yml`) plus
+**Genesys Cloud**, which opens on the laptop. There is one bar with open windows, clock and log out:
+no apps menu, no terminal, no shutdown. With Chrome installed, the browser opens every system as a tab
+with a "Call Center" bookmarks bar.
 
 The endpoints have no screen in the simulation. Their configuration is checked by the tests, but you
 can't see the agent's own Ubuntu desktop with the Genesys window. To see that, run the same playbook
@@ -90,11 +114,12 @@ against an Ubuntu Desktop 24.04 virtual machine (VirtualBox, Hyper-V) using `ans
 | Portal: AD + MFA from outside, clipboard/file transfer blocked | `test_08_portal`: TOTP enrolment and login, wrong code refused, outsider refused, default `guacadmin` disabled, HTTP→HTTPS, TLS ≥ 1.2, HSTS, only 80/443 exposed, internal hosts unreachable from outside, copy/paste/drive/SFTP/printing off, desktop opens over the browser websocket and the session is recorded, brute force is rate-limited then banned by fail2ban | — |
 | USB storage blocked, no admin rights | `test_09_endpoint_lockdown`: `usb-storage`/`uas` resolve to `/bin/false`, udisks mount denied by polkit, agent has no sudo, idle screen lock set and locked, Chrome policies (no downloads, DevTools, incognito, extensions) | U-1 … U-4, D-1 |
 | Golden image deploys without manual steps | `lab.sh golden-image` (bare device → one playbook run → endpoint tests pass); `test_10`: re-running the image changes nothing | I-1 |
+| Windows laptop as viewer (option A) | `test_11_viewer`: ticket needs Kerberos, refused outside the group, single-use and bound to its user, AD passwords never sent to the broker; laptop login opens the desktop with a ticket and Genesys starts on the laptop by itself; the session's Genesys icon brings it forward on the agent's own laptop only; only allow-listed apps; closing the desktop ends the laptop session; icon per catalog system, Chrome tabs/bookmarks, no terminal/shutdown for agents, per-user CPU/RAM cap | W-1 … W-9 |
 | Pilot: call quality, login time, per-user sizing | `tools/genesys_call_quality.py` (MOS by group, from the Genesys Analytics API), `tools/sessionhost_usage.py` | L-1 … L-3 |
 
-Last full run in the simulation, from a clean start with `lab.sh`: **75 passed, 0 failed, 7 skipped**. The skips
-are the Chrome install check (×2, Chrome download blocked in that environment) and five `lab_only`
-checks: NFS mount ×2, disk encryption, `lsmod` ×2.
+Last full run in the simulation, from a clean start with `lab.sh`: **96 passed, 0 failed, 7 skipped**
+(17 of them are the Windows-viewer flow). The skips are the Chrome install check (×2, Chrome download
+blocked in that environment) and five `lab_only` checks: NFS mount ×2, disk encryption, `lsmod` ×2.
 
 ## What the simulation does not prove
 
@@ -156,7 +181,13 @@ The failover test powers a session host off through the `power_off` and `power_o
     the role does. Consider USBGuard with an allow-list of headset models (U-1).
 11. **Disk encryption on home endpoints needs an unlock decision.** A boot passphrase for every agent,
     TPM unlock or network unlock (D-1).
-12. **`realm join` is replaced by `adcli join` plus a templated `sssd.conf`** with
+12. **Single sign-on into xrdp needs a helper.** xrdp has no NLA/Kerberos login, so a Windows
+    laptop cannot pass its logon on to the session hosts by itself. The broker issues a one-time
+    password after Kerberos authentication. `pam_exec` on the session hosts accepts it, and only
+    passwords that look like tickets are ever sent to the broker.
+13. **The Genesys Cloud desktop app exists only for Windows and macOS.** Using it means keeping
+    Windows on the laptops, which is option A. The Linux endpoint (option B) has to use the web app.
+14. **`realm join` is replaced by `adcli join` plus a templated `sssd.conf`** with
     `access_provider = simple`. That is what `realm join` + `realm permit -g` write, but it is
     repeatable from Ansible and needs no realmd or packagekit. SSSD shows AD group names in lower
     case (`cc-agents-test`). The group check still works, as `test_01` shows.
@@ -173,5 +204,7 @@ ansible/                  site.yml, roles (ad_member, session_host, chrome, endp
 tests/                    pytest suite, targets/{sim.yml,lab.yml.example}, app inventories
 docs/MANUAL_TESTS.md      manual test scripts and results sheet
 docs/screenshots/         what the portal and desktop look like
+services/                 cc-broker, session-host helpers, Linux reference laptop agent
+windows/                  option A: CC-Shell.ps1, cc-shell.json, installer, Group Policy steps
 tools/                    genesys_call_quality.py, sessionhost_usage.py
 ```

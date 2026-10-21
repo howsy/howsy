@@ -19,3 +19,11 @@ vpn_private_key: "{{ lookup('file', inventory_dir + '/../../../.lab/vpn/' + inve
 vpn_routed_subnets: [10.10.0.0/24]
 vpn_dns_server: 10.10.0.10
 vpn_dns_mode: resolvconf       # docker owns resolv.conf; real endpoints use systemd-resolved
+
+# Broker: single sign-on from the laptop and "open on my laptop" (Genesys)
+broker_url: http://broker-01.lab.example.com:8088
+broker_spn: HTTP@broker-01.lab.example.com
+broker_host_token: "{{ lookup('file', inventory_dir + '/../../../.lab/broker-token') }}"
+
+# Agent desktop: one icon / tab / bookmark per system. Same list the tests check.
+cc_systems: "{{ (lookup('file', inventory_dir + '/../../../tests/apps.sim.yml') | from_yaml).apps }}"

@@ -88,6 +88,23 @@ The automated `test_04_apps.py` only proves each app is reachable from each plac
 |----|-------|---------|
 | I-1 | PXE-boot a brand-new mini PC and a reused laptop. Do not touch the keyboard after choosing PXE. Then run `ansible-playbook site.yml --limit <device>` and `LAB_TARGETS=... python3 -m pytest tests -m endpoint`. | The device installs, joins AD and passes every endpoint test with no manual step. Note the minutes taken. |
 
+## Windows laptop as viewer (windows/README.md)
+
+Use one test laptop with your current Windows image. Set up `cc-shell.json` and run
+`Install-CCShell.ps1 -TestUser <DOMAIN\testagent>`, or apply the GPO to a test OU.
+
+| ID | Steps | Pass if |
+|----|-------|---------|
+| W-1 | Log in to Windows as the test agent. | No Windows desktop, Start menu or taskbar appears. The call-center desktop opens by itself with **no second password prompt**. |
+| W-2 | Look at the server desktop. | One icon per system from the catalog, plus "Genesys Cloud". Chrome is open with every system as a tab and a "Call Center" bookmarks bar. |
+| W-3 | Wait after the desktop opens; do not click anything. | The Genesys Cloud desktop app starts **on the laptop** within ~10 s. Docked layout: it sits on the right and the server desktop on the left. |
+| W-4 | Close Genesys, then double-click the "Genesys Cloud" icon on the server desktop. Minimise it and click the icon again. | It starts again, then comes back to the front. A call made right after (G-3) has clear audio, because voice is local. |
+| W-5 | Try Win key, Alt+Tab, Win+R, Win+E, and Ctrl+Shift+Esc. | Nothing on the laptop opens. Key combinations act inside the server desktop. Ctrl+Alt+Del offers only Lock / Sign out / Change password. |
+| W-6 | Log out from the server desktop (bottom-right button). | The laptop asks "Reconnect?". *Yes* opens a fresh session without a password. *No* signs the agent out of Windows. |
+| W-7 | Pull the network cable for 20 s, then reconnect. | Remote Desktop reconnects by itself, or the "Reconnect?" prompt appears. Genesys on the laptop keeps running. |
+| W-8 | Log in as an IT admin (not in CC-Agents). Log in as a user outside the group. | The admin gets the normal Windows desktop. The outsider gets no call-center desktop (broker refuses: see `%LOCALAPPDATA%\CallCenter\cc-shell.log`). |
+| W-9 | Check Task Manager on the session host side with 10+ agents logged in (`tools/sessionhost_usage.py`), and on a laptop (as admin). | Web systems use server CPU and RAM. On the laptop only mstsc and Genesys are busy. |
+
 ## Pilot measures
 
 | ID | Steps | Pass if |

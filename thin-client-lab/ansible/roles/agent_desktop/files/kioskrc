@@ -1,0 +1,19 @@
+# Xfce kiosk mode for agents (members of sudo keep full control).
+[xfce4-panel]
+CustomizePanel=%sudo
+
+[xfce4-session]
+CustomizeSplash=%sudo
+CustomizeChooser=%sudo
+CustomizeLogout=%sudo
+CustomizeCompatibility=%sudo
+CustomizeSecurity=%sudo
+# A session host is shared: agents may log out, never shut down or reboot it.
+Shutdown=%sudo
+
+[xfdesktop]
+UserMenu=%sudo
+CustomizeBackdrop=%sudo
+CustomizeDesktopMenu=%sudo
+CustomizeWindowlist=%sudo
+CustomizeDesktopIcons=%sudo

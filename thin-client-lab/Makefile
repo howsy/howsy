@@ -24,7 +24,10 @@ export ADMIN_PASSWORD AGENT_PASSWORD SVC_GUAC_PASSWORD GUAC_DB_PASSWORD CHROME_I
 	mv $@.tmp $@
 	cp config/guacamole/002-seed.sql .lab/guac-initdb/
 
-prereqs: .lab/ssh/id_ed25519 .lab/vpn/gateway.pub .lab/guac-initdb/001-schema.sql
+.lab/broker-token:
+	mkdir -p .lab && umask 077 && python3 -c "import secrets; print(secrets.token_urlsafe(32))" > $@
+
+prereqs: .lab/ssh/id_ed25519 .lab/vpn/gateway.pub .lab/guac-initdb/001-schema.sql .lab/broker-token
 
 # ssh refuses keys with the loose permissions bind mounts get on Windows/macOS.
 ssh-key: .lab/ssh/id_ed25519

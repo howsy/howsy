@@ -1,0 +1,4 @@
+broker_port: 8088
+broker_allowed_group: cc-agents-test     # SSSD shows AD group names in lower case
+broker_apps: [genesys]                   # app ids a session may open on the laptop
+broker_ticket_ttl: 120

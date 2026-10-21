@@ -2,6 +2,7 @@
 # Simulated call-center lab. Needs only Docker (with Compose v2).
 #   ./lab.sh all          start, configure and test everything
 #   ./lab.sh up | provision | test | test-fast | golden-image | info | shell | down | clean
+#   ./lab.sh watch-laptop [user]   live view of what the agent's laptop is told to do
 set -euo pipefail
 cd "$(dirname "$0")"
 DC="docker compose"
@@ -24,6 +25,8 @@ Lab is running. Try it like an agent would:
                      user agent1 / Agent-Pass1!   (scan the QR code with any authenticator app)
                      user outsider1 is a real AD account that must be refused
   Session desktop    Remote Desktop to localhost:13389  (agent1 / Agent-Pass1!)
+                     run "./lab.sh watch-laptop" in another terminal, then double-click
+                     "Genesys Cloud" on that desktop: the laptop starts / focuses Genesys
   HAProxy stats      http://localhost:8404/
 
 Passwords come from .env. The browser will warn about the self-signed certificate.
@@ -34,13 +37,15 @@ cmd=${1:-help}; shift || true
 case "$cmd" in
   up)           up ;;
   provision)    $CTL make provision ANSIBLE_ARGS="$*" ;;
-  test)         $CTL make test PYTEST_ARGS="$*" ;;
-  test-fast)    $CTL make test-fast PYTEST_ARGS="$*" ;;
+  test)         $CTL make -s ssh-key && $CTL python3 -m pytest tests "$@" ;;
+  test-fast)    $CTL make -s ssh-key && $CTL python3 -m pytest tests -m "not slow" "$@" ;;
   golden-image) $DC rm -sf ep-office-01 && $DC up -d --wait ep-office-01 && $CTL make golden-provision ;;
   all)          up && $CTL make provision && $CTL make test && info ;;
   info)         info ;;
+  watch-laptop) user=${1:-agent1}; pw=$(sed -n 's/^AGENT_PASSWORD=//p' .env)
+                $DC exec ep-office-01 su - "$user" -c "printf '%s' '$pw' | kinit $user >/dev/null && cc-laptop-listen" ;;
   shell)        $DC exec controller bash ;;
   down)         $DC down ;;
   clean)        $DC exec -T controller rm -rf /lab/.lab 2>/dev/null || true; $DC down -v --remove-orphans ;;
-  *)            sed -n '2,5p' "$0" ;;
+  *)            sed -n '2,6p' "$0" ;;
 esac

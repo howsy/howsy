@@ -1,3 +1,4 @@
 ad_server: ""                 # empty: discover domain controllers through DNS SRV records
 ad_allowed_groups: [CC-Agents-Test]
 ad_dyndns_update: true
+ad_service_names: []          # extra Kerberos services for this host, e.g. [HTTP] on the broker

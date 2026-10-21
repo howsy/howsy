@@ -1,9 +1,14 @@
 # Configures every managed machine in the lab. Same playbook for the simulated
 # lab (inventories/sim) and the real Proxmox lab (inventories/lab).
-- name: Session hosts (lab steps 3-5)
+- name: Broker - SSO tickets and open-on-laptop
+  hosts: brokers
+  become: true
+  roles: [common, ad_member, broker]
+
+- name: Session hosts (lab steps 3-5) and the agent desktop
   hosts: session_hosts
   become: true
-  roles: [common, ad_member, chrome, session_host]
+  roles: [common, ad_member, chrome, session_host, session_sso, agent_desktop]
 
 # A home endpoint only reaches AD through the tunnel, so the VPN goes on first.
 - name: Home endpoints - always-on VPN (lab step 9)
@@ -15,3 +20,8 @@
   hosts: endpoints
   become: true
   roles: [common, ad_member, chrome, endpoint]
+
+- name: Simulated Windows laptop (viewer flow)
+  hosts: laptops_sim
+  become: true
+  roles: [laptop_agent_sim]

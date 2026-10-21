@@ -1,0 +1,10 @@
+# Every web system the agent uses: one desktop icon, one browser tab, one bookmark.
+cc_systems: []                 # [{name: CRM, url: https://crm.example.local/, icon: applications-office}]
+# Programs that run on the agent's laptop but are started from the remote desktop.
+cc_local_apps:
+  - {id: genesys, name: Genesys Cloud, icon: phone, autostart: true}
+# Per-user share of a session host, so one agent cannot starve the others.
+cc_user_memory_max: 4G
+cc_user_cpu_quota: 200%
+# Programs agents may not run on the session hosts (admins in sudo still can).
+cc_admin_only_programs: [/usr/bin/xfce4-terminal, /usr/bin/xfce4-appfinder]

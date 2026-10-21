@@ -47,6 +47,16 @@ services:
     volumes: [dc-data:/var/lib/samba, dc-etc:/etc/samba]
     networks: {corp: {ipv4_address: 10.10.0.10}}
 
+  # Broker: SSO tickets for laptops and "open on my laptop" (services/cc_broker.py)
+  broker-01:
+    <<: *managed-node
+    container_name: cclab-broker-01
+    hostname: broker-01
+    dns: [10.10.0.10]
+    dns_search: [lab.example.com]
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/etc/lab/authorized_key:ro]
+    networks: {corp: {ipv4_address: 10.10.0.25}}
+
   sh-01:
     <<: *managed-node
     container_name: cclab-sh-01

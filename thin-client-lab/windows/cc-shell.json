@@ -1,0 +1,14 @@
+{
+  "BrokerUrl": "https://broker-01.yourdomain.local:8443",
+  "RdpHost": "rdp.yourdomain.local",
+  "Domain": "YOURDOMAIN",
+  "RdpAuthenticationLevel": 2,
+  "Layout": "docked",
+  "GenesysWidth": 420,
+  "Apps": {
+    "genesys": {
+      "Path": "%LOCALAPPDATA%\\Programs\\genesys-cloud-desktop\\Genesys Cloud.exe",
+      "ProcessName": "Genesys Cloud"
+    }
+  }
+}

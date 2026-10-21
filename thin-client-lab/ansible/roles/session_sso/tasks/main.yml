@@ -1,0 +1,55 @@
+# Session-host side of the broker: accept one-time SSO tickets at the RDP login,
+# and relay "open on my laptop" requests from the user's session.
+- name: Config directory
+  ansible.builtin.file:
+    path: /etc/cc-broker
+    state: directory
+    mode: "0755"
+
+- name: Broker client configuration (root only, contains the host token)
+  ansible.builtin.copy:
+    content: "{{ {'broker_url': broker_url, 'host_token': broker_host_token} | to_nice_json }}\n"
+    dest: /etc/cc-broker/client.json
+    mode: "0600"
+  notify: Restart relay
+
+- name: Helper programs
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../services/{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0755"
+  loop:
+    - {src: cc-sso-verify, dest: /usr/local/sbin/cc-sso-verify}
+    - {src: cc-launch-relay.py, dest: /usr/local/sbin/cc-launch-relay}
+    - {src: cc-local-launch, dest: /usr/local/bin/cc-local-launch}
+  notify: Restart relay
+
+- name: RDP login accepts a broker ticket, then falls back to the AD password
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/xrdp-sesman
+    line: "auth [success=done default=ignore] pam_exec.so quiet expose_authtok /usr/local/sbin/cc-sso-verify"
+    insertbefore: "^@include common-auth"
+    regexp: "cc-sso-verify"
+
+- name: Launch relay service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/cc-launch-relay.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Relay "open on my laptop" requests to cc-broker
+
+      [Service]
+      ExecStart=/usr/local/sbin/cc-launch-relay
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart relay
+
+- name: Launch relay running
+  ansible.builtin.systemd_service:
+    name: cc-launch-relay
+    enabled: true
+    state: started
+    daemon_reload: true

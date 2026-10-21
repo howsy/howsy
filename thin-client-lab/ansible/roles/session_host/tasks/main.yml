@@ -1,7 +1,7 @@
 # Lab steps 4-5: remote desktops with xrdp + XFCE, central home folders.
 - name: Install xrdp and XFCE
   ansible.builtin.apt:
-    name: [xrdp, xorgxrdp, xfce4, xfce4-terminal, dbus-x11, xfonts-base, xauth]
+    name: [xrdp, xorgxrdp, xfce4, xfce4-terminal, dbus-x11, xfonts-base, xauth, elementary-xfce-icon-theme]
     install_recommends: false
   environment: {DEBIAN_FRONTEND: noninteractive}
 

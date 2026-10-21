@@ -1,7 +1,19 @@
-# App inventory: every app agents use besides Genesys, and where it must open from.
+# App inventory / catalog. Used by Ansible for the agent desktop (one icon, one
+# browser tab and one bookmark per entry) and by test_04 for reachability.
 # where: session_hosts | office_endpoints | home_endpoints
 apps:
-  - name: CRM (sample internal app)
+  - name: CRM
     url: http://crm.lab.example.com/
     expect: CRM
+    icon: x-office-address-book
     where: [session_hosts, office_endpoints, home_endpoints]
+  - name: Knowledge Base
+    url: http://crm.lab.example.com/kb.html
+    expect: Knowledge
+    icon: help-browser
+    where: [session_hosts]
+  - name: Ticketing
+    url: http://crm.lab.example.com/tickets.html
+    expect: Tickets
+    icon: mail-mark-important
+    where: [session_hosts]

@@ -1,0 +1,78 @@
+# cc-broker: single sign-on tickets and "open on my laptop" commands.
+# The host is AD-joined with an HTTP service principal (ad_service_names: [HTTP]).
+- name: Python Kerberos bindings
+  ansible.builtin.apt:
+    name: [python3-gssapi]
+
+- name: Service account
+  ansible.builtin.user:
+    name: cc-broker
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Config directory
+  ansible.builtin.file:
+    path: /etc/cc-broker
+    state: directory
+    owner: root
+    group: cc-broker
+    mode: "0750"
+
+- name: Keytab for the HTTP service principal
+  ansible.builtin.copy:
+    src: /etc/krb5.keytab
+    remote_src: true
+    dest: /etc/cc-broker/http.keytab
+    owner: root
+    group: cc-broker
+    mode: "0640"
+  notify: Restart cc-broker
+
+- name: Broker configuration
+  ansible.builtin.copy:
+    content: "{{ {'port': broker_port, 'allowed_group': broker_allowed_group, 'apps': broker_apps,
+                 'ticket_ttl': broker_ticket_ttl, 'host_token': broker_host_token} | to_nice_json }}\n"
+    dest: /etc/cc-broker/broker.json
+    owner: root
+    group: cc-broker
+    mode: "0640"
+  notify: Restart cc-broker
+
+- name: Broker program
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../services/cc_broker.py"
+    dest: /usr/local/sbin/cc-broker
+    mode: "0755"
+  notify: Restart cc-broker
+
+- name: Broker service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/cc-broker.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Call-center broker (SSO tickets, open-on-laptop)
+      After=network-online.target sssd.service
+      Wants=network-online.target
+
+      [Service]
+      User=cc-broker
+      Environment=KRB5_KTNAME=/etc/cc-broker/http.keytab
+      ExecStart=/usr/local/sbin/cc-broker
+      Restart=always
+      NoNewPrivileges=true
+      ProtectSystem=strict
+      ProtectHome=true
+      PrivateTmp=true
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart cc-broker
+
+- name: Broker running
+  ansible.builtin.systemd_service:
+    name: cc-broker
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,0 +1,5 @@
+- name: Restart cc-broker
+  ansible.builtin.systemd_service:
+    name: cc-broker
+    state: restarted
+    daemon_reload: true

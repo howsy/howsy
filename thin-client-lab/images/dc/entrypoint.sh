@@ -55,6 +55,7 @@ add_a guac    10.10.0.40
 add_a files   10.10.0.20
 add_a crm     10.10.0.80   # sample internal web app from the app inventory
 add_a vpn     10.10.0.60
+add_a broker-01 10.10.0.25 # cc-broker (SSO tickets, open-on-laptop)
 touch /run/dc-seeded
 echo ">> domain controller ready"
 wait "$SAMBA_PID"

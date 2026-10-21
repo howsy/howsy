@@ -5,6 +5,7 @@ domain: lab.example.com
 
 hosts:                     # testinfra connection strings
   dc: docker://cclab-dc
+  broker-01: docker://cclab-broker-01
   sh-01: docker://cclab-sh-01
   sh-02: docker://cclab-sh-02
   lb: docker://cclab-lb
@@ -72,3 +73,10 @@ genesys_direct_ip: 172.30.0.200
 
 apps_file: apps.sim.yml
 ansible_inventory: ansible/inventories/sim/hosts.yml
+
+# Viewer flow: Windows laptop -> broker SSO -> session desktop; Genesys opened on the laptop
+viewer:
+  broker_host: broker-01
+  broker_url: http://broker-01.lab.example.com:8088
+  laptop: ep-office-01          # stands in for the agent's Windows laptop
+  local_app: genesys

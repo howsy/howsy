@@ -1,0 +1,166 @@
+# The agent's desktop on the session hosts: icons for every system, the browser
+# opening all systems as tabs, Genesys started on the laptop, and lock-down.
+- name: Desktop helpers
+  ansible.builtin.apt:
+    name: [gvfs, libglib2.0-bin, xdg-user-dirs]
+    install_recommends: false
+
+- name: Helper scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: "0755"
+  loop: [cc-open, cc-desktop-setup]
+
+- name: Launcher directory
+  ansible.builtin.file:
+    path: /usr/share/cc-desktop
+    state: directory
+    mode: "0755"
+
+- name: Icon for each web system (opens it as a browser tab)
+  ansible.builtin.copy:
+    dest: "/usr/share/cc-desktop/cc-web-{{ item.name | lower | regex_replace('[^a-z0-9]+', '-') }}.desktop"
+    mode: "0755"
+    content: |
+      [Desktop Entry]
+      Type=Application
+      Name={{ item.name }}
+      Icon={{ item.icon | default('applications-internet') }}
+      Exec=/usr/local/bin/cc-open {{ item.url }}
+      Terminal=false
+  loop: "{{ cc_systems }}"
+  loop_control: {label: "{{ item.name }}"}
+
+- name: Icon for each laptop app (starts it on the agent's own laptop)
+  ansible.builtin.copy:
+    dest: "/usr/share/cc-desktop/cc-local-{{ item.id }}.desktop"
+    mode: "0755"
+    content: |
+      [Desktop Entry]
+      Type=Application
+      Name={{ item.name }}
+      Comment=Opens on your laptop
+      Icon={{ item.icon | default('computer') }}
+      Exec=/usr/local/bin/cc-local-launch {{ item.id }}
+      Terminal=false
+  loop: "{{ cc_local_apps }}"
+  loop_control: {label: "{{ item.name }}"}
+
+- name: Find launchers no longer in the catalog
+  ansible.builtin.find:
+    paths: /usr/share/cc-desktop
+    patterns: "cc-*.desktop"
+  register: _launchers
+
+- name: Remove launchers no longer in the catalog
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _launchers.files }}"
+  loop_control: {label: "{{ item.path | basename }}"}
+  when: (item.path | basename) not in _wanted
+  vars:
+    _wanted: >-
+      {{ (cc_systems | map(attribute='name') | map('lower') | map('regex_replace', '[^a-z0-9]+', '-')
+          | map('regex_replace', '^', 'cc-web-') | map('regex_replace', '$', '.desktop') | list)
+       + (cc_local_apps | map(attribute='id') | map('regex_replace', '^', 'cc-local-')
+          | map('regex_replace', '$', '.desktop') | list) }}
+
+- name: At login - icons on the desktop, browser with every system, laptop apps
+  ansible.builtin.copy:
+    dest: "/etc/xdg/autostart/{{ item.file }}"
+    mode: "0644"
+    content: |
+      [Desktop Entry]
+      Type=Application
+      Name={{ item.name }}
+      Exec={{ item.exec }}
+      NoDisplay=true
+  loop:
+    - {file: cc-browser.desktop, name: Call-center systems, exec: /usr/local/bin/cc-open}
+    - file: cc-local-apps.desktop
+      name: Call-center laptop apps
+      exec: "sh -c '{% for a in cc_local_apps if a.autostart | default(false) %}/usr/local/bin/cc-local-launch {{ a.id }}; {% endfor %}true'"
+  loop_control: {label: "{{ item.file }}"}
+
+- name: Browser opens every system as a tab, with a bookmarks bar of all systems
+  ansible.builtin.copy:
+    dest: /etc/opt/chrome/policies/managed/cc-desktop.json
+    mode: "0644"
+    content: "{{ _policy | to_nice_json }}\n"
+  vars:
+    _policy:
+      RestoreOnStartup: 4
+      RestoreOnStartupURLs: "{{ cc_systems | map(attribute='url') | list }}"
+      HomepageLocation: "{{ (cc_systems | first).url if cc_systems else 'about:blank' }}"
+      ShowHomeButton: true
+      BookmarkBarEnabled: true
+      ManagedBookmarks: >-
+        {% set marks = [{'toplevel_name': 'Call Center'}] %}{% for sys in cc_systems %}{% set _ = marks.append({'name': sys.name, 'url': sys.url}) %}{% endfor %}{{ marks }}
+
+- name: Session start hook directory
+  ansible.builtin.file:
+    path: /etc/xrdp/startwm.d
+    state: directory
+    mode: "0755"
+
+- name: Before XFCE starts - reset the agent layout and place trusted icons
+  ansible.builtin.copy:
+    dest: /etc/xrdp/startwm.d/50-cc-desktop.sh
+    mode: "0644"
+    content: |
+      # Every login starts from the managed layout: drop the user's own panel and
+      # desktop settings so the system defaults below apply, then place icons.
+      rm -f "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml" \
+            "$HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml"
+      rm -rf "$HOME/.config/xfce4/panel"
+      dbus-run-session -- /usr/local/bin/cc-desktop-setup >/dev/null 2>&1
+
+- name: Remove the old login-time icon autostart
+  ansible.builtin.file:
+    path: /etc/xdg/autostart/cc-desktop-setup.desktop
+    state: absent
+
+- name: Agent layout - one bottom bar with open windows, clock and log out; only call-center icons
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/{{ item }}"
+    mode: "0644"
+  loop: [xfce4-panel.xml, xfce4-desktop.xml]
+
+- name: Terminals are for admins only (agents use the browser)
+  ansible.builtin.command: dpkg-statoverride --update --add root sudo 0750 {{ item }}
+  loop: "{{ cc_admin_only_programs }}"
+  register: _override
+  changed_when: _override.rc == 0
+  failed_when: _override.rc != 0 and 'already exists' not in _override.stderr
+
+- name: Kiosk directory
+  ansible.builtin.file:
+    path: /etc/xdg/xfce4/kiosk
+    state: directory
+    mode: "0755"
+
+- name: Agents cannot change the desktop, panel or shut the shared server down
+  ansible.builtin.copy:
+    src: kioskrc
+    dest: /etc/xdg/xfce4/kiosk/kioskrc
+    mode: "0644"
+
+- name: Per-user CPU and memory cap directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/user-.slice.d
+    state: directory
+    mode: "0755"
+
+- name: Per-user CPU and memory cap
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/user-.slice.d/50-cc-limits.conf
+    mode: "0644"
+    content: |
+      # Every agent's session together may use at most this much of the host.
+      [Slice]
+      MemoryMax={{ cc_user_memory_max }}
+      CPUQuota={{ cc_user_cpu_quota }}
+  notify: Reload systemd units

@@ -97,7 +97,7 @@ class RdpClient:
         self.h.run(cmd)
 
     def disconnect(self):
-        self.h.run(f"pkill -f {q('/t:' + self.tag)}")
+        self.h.run(f"pkill -f {q('[/]t:' + self.tag)}")   # [/] keeps pkill from matching this shell
         time.sleep(1)
 
     def log(self):

@@ -23,6 +23,7 @@
     adcli join --domain {{ ad_domain }} --domain-ou "{{ ad_computer_ou }}"
     --login-user {{ ad_join_user }} --stdin-password
     --host-fqdn {{ ansible_hostname }}.{{ ad_domain }}
+    {% for svc in ad_service_names %}--service-name={{ svc }} {% endfor %}
   args:
     stdin: "{{ ad_join_password }}"
   when: ad_testjoin.rc != 0
