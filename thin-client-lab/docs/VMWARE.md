@@ -51,6 +51,12 @@ In the VM's terminal:
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER
 ```
+If the script says your Ubuntu release is not supported (e.g. a very new release such as 26.04),
+use Ubuntu's own Docker packages instead:
+```bash
+sudo apt install -y docker.io docker-compose-v2
+sudo usermod -aG docker $USER
+```
 **Log out and log back in** (or reboot) so your user can use Docker. Then check:
 ```bash
 docker run --rm hello-world        # prints "Hello from Docker!"
@@ -141,6 +147,7 @@ Use `stop`/`start` instead to pause.
 
 | Problem | Fix |
 |---|---|
+| Boot shows *"piix4_smbus … SMBus Host Controller not enabled!"* | Harmless VMware message. Ignore it. With *Easy Install*, wait until Ubuntu restarts at its login screen. |
 | VMware: *"does not support virtualized performance counters"*, *"Module 'VPMC' power on failed"* | Power the VM off → Edit settings → Processors → untick **Virtualize CPU performance counters** (and the other virtualization boxes). If it is greyed out: close VMware, add or change `vpmc.enable = "FALSE"` in the VM's `.vmx` file. |
 | VMware: errors about VT-x, Hyper-V or Credential Guard | Untick the virtualization boxes as above and update VMware Workstation to 17.5 or newer. |
 | `permission denied ... docker.sock` | You did not log out/in after step 4. Log out and back in. |
