@@ -17,25 +17,62 @@ The suite cannot judge calls, headsets or real hardware, so [`docs/MANUAL_TESTS.
 holds step-by-step manual tests and a results sheet for those. `tools/` has two scripts for the pilot
 measures.
 
-## Quick start (simulation)
+## Run it on your computer
 
-Needs Docker with Compose v2, Python 3.10+, `ssh` and about 8 GB RAM.
+You only need **Docker**: Docker Desktop on Windows 10/11 (WSL 2 backend) or macOS, or Docker Engine
+with Compose v2 on Linux. Give Docker at least **8 GB of RAM** and about 15 GB of disk.
+Ansible, Python and the test tools run inside a `controller` container, so nothing else is
+installed on your computer.
 
 ```bash
-cd thin-client-lab
-make up          # build and start the containers (first run: ~5 min)
-make provision   # Ansible: AD join, xrdp + XFCE, endpoint image, VPN (~4 min)
-make test        # full suite (~6 min); `make test-fast` skips failover/ban/idempotency
-make golden-image   # wipe an endpoint, rebuild from bare Ubuntu, re-test
-make clean       # remove everything, including volumes
+git clone https://github.com/howsy/howsy.git
+cd howsy/thin-client-lab
 ```
 
-The containers keep their configuration only until they are recreated. After `make clean`, or after
-removing a session host or endpoint, run `make provision` again. Rejoining AD is handled.
+| | Windows (PowerShell) | macOS / Linux |
+|---|---|---|
+| Everything: start, configure, test (~15 min first time) | `powershell -ExecutionPolicy Bypass -File .\lab.ps1 all` | `./lab.sh all` |
+| Start the lab | `.\lab.ps1 up` | `./lab.sh up` |
+| Configure machines with Ansible | `.\lab.ps1 provision` | `./lab.sh provision` |
+| Run all tests / skip slow ones | `.\lab.ps1 test` / `test-fast` | `./lab.sh test` / `test-fast` |
+| Rebuild an endpoint from bare Ubuntu and re-test | `.\lab.ps1 golden-image` | `./lab.sh golden-image` |
+| Show the URLs and logins | `.\lab.ps1 info` | `./lab.sh info` |
+| Shell inside the controller | `.\lab.ps1 shell` | `./lab.sh shell` |
+| Stop / delete everything | `.\lab.ps1 down` / `clean` | `./lab.sh down` / `clean` |
 
-Lab-only passwords are in `.env`, which is created from `.env.example`. If the machine cannot reach
-`dl.google.com`, run with `CHROME_INSTALL=false`. Then only the "Chrome installed" test is skipped.
-The policies, launcher and every other endpoint check still run.
+### Look around like an agent
+
+Once `all` (or `up` then `provision`) has finished:
+
+| What | How | Login |
+|---|---|---|
+| Remote portal (emergency / home browser access) | open **https://localhost:8443/** and accept the self-signed certificate warning | `agent1` / `Agent-Pass1!`, then scan the QR code with any authenticator app (Google/Microsoft Authenticator) |
+| A user who must be refused | same page | `outsider1` / `Agent-Pass1!` (a real AD account outside `CC-Agents-Test`) |
+| Session-host desktop, the way office endpoints open it | Remote Desktop (`mstsc` on Windows, Microsoft Remote Desktop on Mac, Remmina on Linux) to **localhost:13389** | `agent1` / `Agent-Pass1!` |
+| Load balancer: which host each session went to | **http://localhost:8404/** | none |
+
+In the portal, click **CC Desktop** (the name, not the `+`) to get a load-balanced desktop. Copy/paste
+in and out of the session is blocked on purpose. These ports listen on your computer only (127.0.0.1).
+
+| Portal login | Outsider refused | TOTP enrolment | Desktop in the browser |
+|---|---|---|---|
+| ![](docs/screenshots/1-portal-login.png) | ![](docs/screenshots/2-outsider-refused.png) | ![](docs/screenshots/3-totp-enrolment.png) | ![](docs/screenshots/5-desktop-in-browser.png) |
+
+The endpoints have no screen in the simulation. Their configuration is checked by the tests, but you
+can't see the agent's own Ubuntu desktop with the Genesys window. To see that, run the same playbook
+against an Ubuntu Desktop 24.04 virtual machine (VirtualBox, Hyper-V) using `ansible/inventories/lab`.
+
+### Good to know
+
+- The machines keep their configuration until they are recreated. After `clean`, or after deleting a
+  session host or endpoint, run `provision` again. Rejoining AD is handled.
+- Lab-only passwords are in `.env`, which is created from `.env.example`. If the computer cannot reach
+  `dl.google.com`, set `CHROME_INSTALL=false` there. Then only the "Chrome installed" test is
+  skipped. On Apple Silicon (ARM) Chrome is skipped automatically, because Google ships Linux Chrome
+  for x86-64 only.
+- Tested on x86-64 Linux with Docker Engine. Windows and macOS use the same containers through
+  Docker Desktop, but have not been run as part of this work. If a step fails there, the error from
+  `lab.ps1` / `lab.sh` says which command failed.
 
 ## Checklist coverage
 
@@ -52,10 +89,10 @@ The policies, launcher and every other endpoint check still run.
 | Home endpoint: VPN before login, internal apps | `test_07_home_vpn`: enabled at boot, ordered before `systemd-user-sessions`, live handshake, internal subnet via `wg0`, AD login from home, nothing internal reachable with the tunnel down (not even by routing to the gateway) | V-1 … V-3 |
 | Portal: AD + MFA from outside, clipboard/file transfer blocked | `test_08_portal`: TOTP enrolment and login, wrong code refused, outsider refused, default `guacadmin` disabled, HTTP→HTTPS, TLS ≥ 1.2, HSTS, only 80/443 exposed, internal hosts unreachable from outside, copy/paste/drive/SFTP/printing off, desktop opens over the browser websocket and the session is recorded, brute force is rate-limited then banned by fail2ban | — |
 | USB storage blocked, no admin rights | `test_09_endpoint_lockdown`: `usb-storage`/`uas` resolve to `/bin/false`, udisks mount denied by polkit, agent has no sudo, idle screen lock set and locked, Chrome policies (no downloads, DevTools, incognito, extensions) | U-1 … U-4, D-1 |
-| Golden image deploys without manual steps | `make golden-image` (bare device → one playbook run → endpoint tests pass); `test_10`: re-running the image changes nothing | I-1 |
+| Golden image deploys without manual steps | `lab.sh golden-image` (bare device → one playbook run → endpoint tests pass); `test_10`: re-running the image changes nothing | I-1 |
 | Pilot: call quality, login time, per-user sizing | `tools/genesys_call_quality.py` (MOS by group, from the Genesys Analytics API), `tools/sessionhost_usage.py` | L-1 … L-3 |
 
-Last full run in the simulation, from `make clean`: **75 passed, 0 failed, 7 skipped**. The skips
+Last full run in the simulation, from a clean start with `lab.sh`: **75 passed, 0 failed, 7 skipped**. The skips
 are the Chrome install check (×2, Chrome download blocked in that environment) and five `lab_only`
 checks: NFS mount ×2, disk encryption, `lsmod` ×2.
 
@@ -75,7 +112,8 @@ checks: NFS mount ×2, disk encryption, `lsmod` ×2.
 1. Copy `ansible/inventories/lab/*.example`, `tests/targets/lab.yml.example` and `tests/apps.lab.yml.example`
    (drop `.example`) and fill in hostnames, AD names and the Genesys region.
 2. `cd ansible && ansible-playbook -i inventories/lab/hosts.yml site.yml`
-3. `LAB_TARGETS=tests/targets/lab.yml make test`. The test machine needs key-based SSH with sudo to the hosts.
+3. `LAB_TARGETS=tests/targets/lab.yml python3 -m pytest tests` (from a machine with the packages in
+   `tests/requirements.txt`). The test machine needs key-based SSH with sudo to the hosts.
    The portal and exposure tests should run from outside the company network. `outside_host` in
    `lab.yml` points at such a machine.
 4. Work through `docs/MANUAL_TESTS.md`.
@@ -96,9 +134,11 @@ The failover test powers a session host off through the `power_off` and `power_o
 3. **Guacamole needs its database, not only LDAP + TOTP.** TOTP keys for LDAP users are stored in
    the DB, so `POSTGRESQL_AUTO_CREATE_ACCOUNTS=true` is required. The default `guacadmin/guacadmin`
    account must be disabled. Both are done in `config/guacamole/002-seed.sql` and tested.
-4. **fail2ban on nginx sees normal logins as failures.** Each TOTP login returns one 403 (the "enter
-   code" step), and a wrong code returns 400, not 403. The filter counts 400, 403 and 429, with
-   `maxretry=10`. Wrong-code guessing is also capped by the nginx rate limit.
+4. **fail2ban and rate limits must allow for how the Guacamole web app behaves.** Each TOTP login
+   returns one 403 (the "enter code" step), and a wrong code returns 400, not 403. The web app also
+   calls the login endpoint on every page load and token refresh. With a strict limit (10/min) real
+   browsers got "An error has occurred"; API-only tests did not catch this. The proxy allows
+   30/min (burst 20), and fail2ban bans after 10 failed attempts (400, 403 or 429).
 5. **Guacamole → AD should use LDAPS.** The simulation uses plain LDAP. Production AD with LDAP
    signing/channel binding enforced will reject that, so plan LDAPS and import the AD CA into
    Guacamole's trust store.
@@ -124,11 +164,14 @@ The failover test powers a session host off through the `power_off` and `power_o
 ## Layout
 
 ```
+lab.sh, lab.ps1           the commands to run on your computer (Linux/macOS, Windows)
 docker-compose.yml        simulated lab (corp 10.10.0.0/24, internet 172.30.0.0/24)
-images/                   dc (Samba AD), managed-node (bare Ubuntu + systemd + SSH), proxy, vpn-gw, probe
+images/                   dc (Samba AD), managed-node (bare Ubuntu + systemd + SSH), proxy, vpn-gw, probe,
+                          controller (Ansible + tests)
 config/                   haproxy.cfg, Guacamole seed SQL, sample internal app, Genesys stand-in
 ansible/                  site.yml, roles (ad_member, session_host, chrome, endpoint, home_vpn), inventories
 tests/                    pytest suite, targets/{sim.yml,lab.yml.example}, app inventories
 docs/MANUAL_TESTS.md      manual test scripts and results sheet
+docs/screenshots/         what the portal and desktop look like
 tools/                    genesys_call_quality.py, sessionhost_usage.py
 ```

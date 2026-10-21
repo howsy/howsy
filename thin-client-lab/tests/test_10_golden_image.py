@@ -1,6 +1,6 @@
 """Checklist: golden image deploys to a new device without manual steps.
 
-Full check: `make golden-image` destroys an endpoint, recreates it from the bare
+Full check: `lab.sh golden-image` destroys an endpoint, recreates it from the bare
 OS image, runs the playbook once and re-runs the endpoint tests.
 This module checks the other half: re-applying the image changes nothing."""
 import os

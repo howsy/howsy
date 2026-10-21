@@ -22,6 +22,8 @@ def test_genesys_opens_in_app_mode_at_login(lab, cfg, endpoint):
 def test_chrome_installed(lab, cfg, endpoint):
     if str(cfg.get("chrome_expected", "true")).lower() != "true":
         pytest.skip("Chrome download disabled for this run (CHROME_INSTALL=false)")
+    if lab.host(endpoint).system_info.arch != "x86_64":
+        pytest.skip("Google Chrome for Linux is x86-64 only")
     assert lab.host(endpoint).package("google-chrome-stable").is_installed
 
 

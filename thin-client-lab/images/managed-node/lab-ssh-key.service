@@ -1,0 +1,11 @@
+[Unit]
+Description=Install the lab SSH key
+Before=ssh.service
+ConditionPathExists=/etc/lab/authorized_key
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/install -m 600 /etc/lab/authorized_key /root/.ssh/authorized_keys
+
+[Install]
+WantedBy=multi-user.target

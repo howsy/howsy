@@ -1,28 +1,22 @@
-# Simulated lab: make up && make provision && make test
+# Runs inside the controller container (started by ./lab.sh or .\lab.ps1).
+# Use those scripts from your computer; they call these targets.
 SHELL := /bin/bash
-COMPOSE := docker compose
 PYTHON ?= python3
 GUAC_VERSION := 1.5.5
 HOME_ENDPOINTS := ep-home-01
 export ANSIBLE_CONFIG := $(CURDIR)/ansible/ansible.cfg
 
 -include .env
-export ADMIN_PASSWORD AGENT_PASSWORD SVC_GUAC_PASSWORD GUAC_DB_PASSWORD
+export ADMIN_PASSWORD AGENT_PASSWORD SVC_GUAC_PASSWORD GUAC_DB_PASSWORD CHROME_INSTALL
 
-.PHONY: all prereqs up provision test test-fast golden-image down clean
-
-all: up provision test
-
-.env:
-	cp .env.example .env
+.PHONY: prereqs ssh-key provision test test-fast golden-provision
 
 .lab/ssh/id_ed25519:
 	mkdir -p .lab/ssh && ssh-keygen -q -t ed25519 -N '' -C cclab -f $@
 
 .lab/vpn/gateway.pub:
-	mkdir -p .lab/vpn
-	$(COMPOSE) build vpn-gw
-	docker run --rm -v $(CURDIR)/.lab/vpn:/keys --entrypoint /gen-keys.sh cclab/vpn-gw $(HOME_ENDPOINTS)
+	mkdir -p .lab/vpn && cd .lab/vpn && umask 077 && for n in gateway $(HOME_ENDPOINTS); do \
+	  [ -f $$n.key ] || wg genkey > $$n.key; wg pubkey < $$n.key > $$n.pub; done
 
 .lab/guac-initdb/001-schema.sql:
 	mkdir -p .lab/guac-initdb
@@ -30,35 +24,24 @@ all: up provision test
 	mv $@.tmp $@
 	cp config/guacamole/002-seed.sql .lab/guac-initdb/
 
-prereqs: .env .lab/ssh/id_ed25519 .lab/vpn/gateway.pub .lab/guac-initdb/001-schema.sql
-	$(PYTHON) -m pip install -q -r tests/requirements.txt
+prereqs: .lab/ssh/id_ed25519 .lab/vpn/gateway.pub .lab/guac-initdb/001-schema.sql
 
-up: prereqs
-	docker image inspect cclab/managed-node >/dev/null 2>&1 || docker build -t cclab/managed-node images/managed-node
-	$(COMPOSE) up -d --build --wait --wait-timeout 300
+# ssh refuses keys with the loose permissions bind mounts get on Windows/macOS.
+ssh-key: .lab/ssh/id_ed25519
+	@if [ -n "$$LAB_SSH_KEY" ]; then mkdir -p $$(dirname $$LAB_SSH_KEY) && install -m 600 $< $$LAB_SSH_KEY; fi
 
 # Configure session hosts and endpoints with the same playbook as the real lab.
-provision:
+provision: ssh-key
 	cd ansible && ansible-playbook site.yml $(ANSIBLE_ARGS)
 
-test:
+test: ssh-key
 	$(PYTHON) -m pytest tests $(PYTEST_ARGS)
 
 # Skips the slow tests (failover, fail2ban ban, playbook idempotency).
-test-fast:
+test-fast: ssh-key
 	$(PYTHON) -m pytest tests -m "not slow" $(PYTEST_ARGS)
 
-# "Golden image deploys to a new device without manual steps":
-# throw away an endpoint, recreate it from the bare image, provision, re-test.
-golden-image:
-	$(COMPOSE) rm -sf ep-office-01
-	$(COMPOSE) up -d --wait ep-office-01
+# Second half of "golden image to a new device": provision the recreated endpoint, re-test.
+golden-provision: ssh-key
 	cd ansible && ansible-playbook site.yml --limit ep-office-01 $(ANSIBLE_ARGS)
 	$(PYTHON) -m pytest tests -m endpoint $(PYTEST_ARGS)
-
-down:
-	$(COMPOSE) down
-
-clean:
-	$(COMPOSE) down -v --remove-orphans
-	rm -rf .lab

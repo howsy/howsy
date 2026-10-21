@@ -4,6 +4,11 @@
 #   corp     10.10.0.0/24   office / data-center network
 #   internet 172.30.0.0/24  "the internet": home endpoint, DMZ face of the proxy,
 #                           VPN gateway, Genesys Cloud stand-in, outside probe
+#
+# Published on this computer only (127.0.0.1) so you can look around:
+#   https://localhost:8443/   remote portal (Guacamole, AD login + TOTP)
+#   localhost:13389           RDP to the session-host farm through HAProxy
+#   http://localhost:8404/    HAProxy statistics
 name: cclab
 
 x-managed-node: &managed-node
@@ -48,7 +53,7 @@ services:
     hostname: sh-01
     dns: [10.10.0.10]
     dns_search: [lab.example.com]
-    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro, homes:/home]
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/etc/lab/authorized_key:ro, homes:/home]
     networks: {corp: {ipv4_address: 10.10.0.21}}
 
   sh-02:
@@ -57,7 +62,7 @@ services:
     hostname: sh-02
     dns: [10.10.0.10]
     dns_search: [lab.example.com]
-    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro, homes:/home]
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/etc/lab/authorized_key:ro, homes:/home]
     networks: {corp: {ipv4_address: 10.10.0.22}}
 
   lb:
@@ -65,6 +70,7 @@ services:
     container_name: cclab-lb
     restart: unless-stopped
     volumes: [./config/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro]
+    ports: ["127.0.0.1:13389:3389", "127.0.0.1:8404:8404"]
     networks: {corp: {ipv4_address: 10.10.0.30}}
 
   guac-db:
@@ -137,8 +143,9 @@ services:
     restart: unless-stopped
     cap_add: [NET_ADMIN]       # fail2ban bans with iptables
     environment:
-      F2B_IGNOREIP: 172.30.0.1   # the machine running the test suite
+      F2B_IGNOREIP: 172.30.0.1 172.30.0.5   # the machines running the test suite
     depends_on: [guac]
+    ports: ["127.0.0.1:8443:443"]
     networks:
       internet: {ipv4_address: 172.30.0.70}
       corp: {ipv4_address: 10.10.0.70}
@@ -175,7 +182,7 @@ services:
     hostname: ep-office-01
     dns: [10.10.0.10]
     dns_search: [lab.example.com]
-    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro]
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/etc/lab/authorized_key:ro]
     networks: {corp: {ipv4_address: 10.10.0.50}}
 
   ep-home-01:
@@ -183,7 +190,7 @@ services:
     container_name: cclab-ep-home-01
     hostname: ep-home-01
     # At home the device only has the internet. AD, DNS and internal apps come via the VPN.
-    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro]
+    volumes: [/sys/fs/cgroup:/sys/fs/cgroup:rw, ./.lab/ssh/id_ed25519.pub:/etc/lab/authorized_key:ro]
     networks: {internet: {ipv4_address: 172.30.0.100}}
 
   probe:
@@ -191,3 +198,15 @@ services:
     build: images/probe
     container_name: cclab-probe
     networks: {internet: {ipv4_address: 172.30.0.150}}
+
+  # Runs Ansible and the tests from inside the lab networks (./lab.sh or .\lab.ps1).
+  controller:
+    image: cclab/controller
+    build: {context: ., dockerfile: images/controller/Dockerfile}
+    container_name: cclab-controller
+    volumes: [".:/lab", "/var/run/docker.sock:/var/run/docker.sock"]
+    environment:
+      CHROME_INSTALL: ${CHROME_INSTALL:-true}
+    networks:
+      corp: {ipv4_address: 10.10.0.5}
+      internet: {ipv4_address: 172.30.0.5}

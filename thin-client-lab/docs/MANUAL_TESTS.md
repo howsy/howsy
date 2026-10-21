@@ -2,11 +2,11 @@
 
 These checklist items need a person, a headset, a real Genesys org or real
 hardware. Run them in the real lab after the automated suite passes
-(`LAB_TARGETS=tests/targets/lab.yml make test`). Record every run in the
+(`LAB_TARGETS=tests/targets/lab.yml python3 -m pytest tests`). Record every run in the
 results sheet at the end. A test passes only when every "Pass if" line holds.
 
 Prerequisites for every session:
-- the device has been built from the current golden image (`make golden-image`
+- the device has been built from the current golden image (`lab.sh golden-image`
   in the sim, PXE + Ansible in the real lab), and the automated endpoint tests
   pass on it
 - test AD users in `CC-Agents-Test`, Genesys Cloud test users with WebRTC phones,
@@ -86,7 +86,7 @@ The automated `test_04_apps.py` only proves each app is reachable from each plac
 
 | ID | Steps | Pass if |
 |----|-------|---------|
-| I-1 | PXE-boot a brand-new mini PC and a reused laptop. Do not touch the keyboard after choosing PXE. Then run `ansible-playbook site.yml --limit <device>` and `LAB_TARGETS=... make test PYTEST_ARGS="-m endpoint"`. | The device installs, joins AD and passes every endpoint test with no manual step. Note the minutes taken. |
+| I-1 | PXE-boot a brand-new mini PC and a reused laptop. Do not touch the keyboard after choosing PXE. Then run `ansible-playbook site.yml --limit <device>` and `LAB_TARGETS=... python3 -m pytest tests -m endpoint`. | The device installs, joins AD and passes every endpoint test with no manual step. Note the minutes taken. |
 
 ## Pilot measures
 

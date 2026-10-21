@@ -12,5 +12,9 @@ RUN apt-get update \
  && systemctl enable ssh \
  && mkdir -p /root/.ssh && chmod 700 /root/.ssh \
  && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+# The lab's public key is mounted at /etc/lab/authorized_key. Copy it with strict
+# permissions at boot (sshd rejects the loose modes of Windows/macOS bind mounts).
+COPY lab-ssh-key.service /etc/systemd/system/lab-ssh-key.service
+RUN systemctl enable lab-ssh-key.service
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
