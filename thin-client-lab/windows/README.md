@@ -22,6 +22,10 @@ desktop, and clicking it starts the app on the laptop or brings it to the front.
 All CPU and RAM for the web systems come from the session hosts. Each agent's share is capped (4 GB,
 2 CPUs by default). The laptop only shows the session and runs Genesys.
 
+**Try it against the simulated lab first:** [`docs/VMWARE.md` section 10](../docs/VMWARE.md#10-connect-a-real-windows-laptop-to-the-lab)
+connects a Windows laptop or Windows VM to the lab running in a VMware VM (`Connect-LabLaptop.ps1`,
+`cc-shell.lab.json`, Notepad as a stand-in for Genesys).
+
 ## Files
 
 | File | Goes to | Purpose |
@@ -29,6 +33,8 @@ All CPU and RAM for the web systems come from the session hosts. Each agent's sh
 | `CC-Shell.ps1` | `C:\Program Files\CallCenter\` | The shell that runs instead of the Windows desktop |
 | `cc-shell.json` | `C:\Program Files\CallCenter\` | Broker URL, RDP address, domain, layout, path of the Genesys app |
 | `Install-CCShell.ps1` | run once as admin | Copies the files; can switch one test user to the shell without Group Policy |
+| `cc-shell.lab.json` | (via `Install-CCShell.ps1 -Config`) | Settings for the simulated lab |
+| `Connect-LabLaptop.ps1` | run as admin, lab only | Routes this machine to the lab in a VM, sets DNS, checks ports, joins the lab domain |
 
 Keep `C:\Program Files\CallCenter` writable by administrators only. Whatever is in that folder runs at
 every agent login.

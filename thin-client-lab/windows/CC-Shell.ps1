@@ -20,6 +20,7 @@ $logFile = Join-Path $logDir 'cc-shell.log'
 function Log([string]$msg) { Add-Content -Path $logFile -Value ("{0:s} {1}" -f (Get-Date), $msg) }
 
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Security
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -47,9 +48,14 @@ function Start-Desktop {
   # mstsc picks up saved TERMSRV credentials; the ticket is single-use and expires in minutes.
   & cmdkey.exe /generic:$target /user:"$($cfg.Domain)\$($t.username)" /pass:"$($t.password)" | Out-Null
   $rdp = Join-Path $logDir 'cc-desktop.rdp'
+  # Also put the ticket in the .rdp file, encrypted for this Windows user (DPAPI):
+  # xrdp has no NLA, and this is the way mstsc reliably logs in to it.
+  $enc = [System.Security.Cryptography.ProtectedData]::Protect(
+           [Text.Encoding]::Unicode.GetBytes($t.password), $null, 'CurrentUser')
   $lines = @(
     "full address:s:$($cfg.RdpHost)",
     "username:s:$($cfg.Domain)\$($t.username)",
+    "password 51:b:$(($enc | ForEach-Object { $_.ToString('X2') }) -join '')",
     "prompt for credentials:i:0",
     "enablecredsspsupport:i:0",          # xrdp does not do NLA
     "authentication level:i:$($cfg.RdpAuthenticationLevel)",
@@ -74,6 +80,7 @@ function Start-Desktop {
   Log "desktop opened for $($t.username) (mstsc pid $($p.Id))"
   Start-Sleep -Seconds 20
   & cmdkey.exe /delete:$target | Out-Null     # never leave the ticket stored
+  Remove-Item -Force $rdp -ErrorAction SilentlyContinue
   return $p
 }
 

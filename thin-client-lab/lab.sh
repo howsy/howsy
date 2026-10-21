@@ -3,6 +3,8 @@
 #   ./lab.sh all          start, configure and test everything
 #   ./lab.sh up | provision | test | test-fast | golden-image | info | shell | stop | start | down | clean
 #   ./lab.sh watch-laptop [user]   live view of what the agent's laptop is told to do
+#   ./lab.sh connect-laptop <ip>   let a real Windows laptop (or Windows VM) at <ip> reach the lab
+#   ./lab.sh disconnect-laptop
 set -euo pipefail
 cd "$(dirname "$0")"
 DC="docker compose"
@@ -45,9 +47,11 @@ case "$cmd" in
   watch-laptop) user=${1:-agent1}; pw=$(sed -n 's/^AGENT_PASSWORD=//p' .env)
                 $DC exec ep-office-01 su - "$user" -c "printf '%s' '$pw' | kinit $user >/dev/null && cc-laptop-listen" ;;
   shell)        $DC exec controller bash ;;
+  connect-laptop)    sudo tools/connect-laptop.sh install "$@" ;;
+  disconnect-laptop) sudo tools/connect-laptop.sh remove ;;
   stop)         $DC stop ;;                       # pause, keeps everything configured
   start)        $DC start && info ;;
   down)         $DC down ;;                       # removes the machines: run provision again after up
   clean)        $DC exec -T controller rm -rf /lab/.lab 2>/dev/null || true; $DC down -v --remove-orphans ;;
-  *)            sed -n '2,6p' "$0" ;;
+  *)            sed -n '2,7p' "$0" ;;
 esac

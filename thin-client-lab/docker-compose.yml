@@ -41,6 +41,7 @@ services:
     image: cclab/dc
     build: images/dc
     container_name: cclab-dc
+    restart: unless-stopped
     hostname: dc01
     privileged: true
     env_file: .env
@@ -86,6 +87,7 @@ services:
   guac-db:
     image: postgres:16
     container_name: cclab-guac-db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: guacamole_db
       POSTGRES_USER: guacamole_user
@@ -106,6 +108,7 @@ services:
   guacd:
     image: guacamole/guacd:1.5.5
     container_name: cclab-guacd
+    restart: unless-stopped
     healthcheck:   # the image's own check runs only every 5 minutes
       test: ["CMD-SHELL", "nc -z 127.0.0.1 4822"]
       interval: 5s
@@ -118,6 +121,7 @@ services:
   guac:
     image: guacamole/guacamole:1.5.5
     container_name: cclab-guac
+    restart: unless-stopped
     depends_on:
       guac-db: {condition: service_healthy}
       dc: {condition: service_healthy}
@@ -164,6 +168,7 @@ services:
     image: cclab/vpn-gw
     build: images/vpn-gw
     container_name: cclab-vpn-gw
+    restart: unless-stopped
     cap_add: [NET_ADMIN]
     devices: [/dev/net/tun]
     sysctls: {net.ipv4.ip_forward: "1"}
@@ -175,12 +180,14 @@ services:
   crm:
     image: nginx:1.27-alpine
     container_name: cclab-crm
+    restart: unless-stopped
     volumes: [./config/apps/crm:/usr/share/nginx/html:ro]
     networks: {corp: {ipv4_address: 10.10.0.80}}
 
   genesys-sim:
     image: nginx:1.27-alpine
     container_name: cclab-genesys-sim
+    restart: unless-stopped
     volumes: [./config/apps/genesys-sim:/usr/share/nginx/html:ro]
     networks:
       internet: {ipv4_address: 172.30.0.200}
@@ -207,6 +214,7 @@ services:
     image: cclab/probe
     build: images/probe
     container_name: cclab-probe
+    restart: unless-stopped
     networks: {internet: {ipv4_address: 172.30.0.150}}
 
   # Runs Ansible and the tests from inside the lab networks (./lab.sh or .\lab.ps1).
@@ -214,6 +222,7 @@ services:
     image: cclab/controller
     build: {context: ., dockerfile: images/controller/Dockerfile}
     container_name: cclab-controller
+    restart: unless-stopped
     volumes: [".:/lab", "/var/run/docker.sock:/var/run/docker.sock"]
     environment:
       CHROME_INSTALL: ${CHROME_INSTALL:-true}

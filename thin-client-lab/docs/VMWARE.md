@@ -146,14 +146,107 @@ Use `stop`/`start` instead to pause.
 | Logs of one machine | `docker compose logs <name>`, e.g. `docker compose logs guac`. For the managed machines: `docker exec -it cclab-sh-01 journalctl -u xrdp`. |
 | Chrome not installed on the session hosts | The VM could not reach `dl.google.com`. Fix the internet access and run `./lab.sh provision`. |
 
-## 10. Next: a real Windows laptop
+## 10. Connect a real Windows laptop to the lab
 
-The simulation plays the laptop with Linux. To try the real thing:
-1. Use a test laptop with your normal Windows image, joined to AD.
-2. Follow [`windows/README.md`](../windows/README.md): edit `cc-shell.json`, run
-   `Install-CCShell.ps1 -TestUser DOMAIN\testagent`.
-3. Work through tests W-1 to W-9 in [`MANUAL_TESTS.md`](MANUAL_TESTS.md).
+This makes a Windows machine a member of the lab's AD, so you can log in as `LAB\agent1` and see the
+real thing: no Windows desktop, the server desktop opening with no second password, and a local app
+opening on the laptop from the server desktop's **Genesys Cloud** icon. Until Genesys is installed,
+Notepad stands in for it.
 
-A Windows laptop can't reach the lab inside this VM as-is. The lab's AD and broker live on Docker
-networks inside the VM. Connecting them needs the real lab (Proxmox, `ansible/inventories/lab`) or
-extra network setup. Ask before trying it.
+### 10.1 Pick the Windows machine
+
+| Choice | When | VMware network of the Ubuntu VM |
+|---|---|---|
+| **A Windows VM next to the Ubuntu VM** (recommended) | Nothing real is touched; you can snapshot it. Use the free 90-day *Windows 11 Enterprise evaluation* ISO from Microsoft's Evaluation Center. 4 GB RAM, 2 CPUs, 64 GB disk. | NAT (unchanged) |
+| A spare physical laptop | You want real hardware, headsets, docked layout on its screen. | **Bridged** (VM → Settings → Network Adapter → Bridged, then reboot the Ubuntu VM) |
+| The computer that runs VMware | Only if it is **not** your work laptop. Joining the lab domain removes it from your company domain. | NAT |
+
+The Windows machine must be **Pro, Enterprise or Education**, because Home editions can't join a domain.
+
+### 10.2 Find the two IP addresses
+
+- **Ubuntu VM:** run `ip -4 addr show` and take the address on `ens33` (e.g. `192.168.142.128`).
+- **Windows machine:** run `ipconfig` and take its IPv4 address. If the Windows machine is the VMware
+  host itself, use the address of the adapter *VMware Network Adapter VMnet8*.
+
+### 10.3 On the Ubuntu VM: let that machine in
+
+```bash
+cd ~/howsy/thin-client-lab
+./lab.sh start                       # if it was stopped
+./lab.sh connect-laptop 192.168.142.130      # the Windows machine's IP; asks for your sudo password
+```
+This restarts Docker once; the lab comes back by itself within a minute. Only that one address is
+let in, and it stays allowed after reboots.
+
+### 10.4 On Windows: connect and join the lab domain
+
+1. Get the `windows` folder of the repo onto the machine. Either use GitHub in a browser
+   (`howsy/howsy`, branch `claude/compassionate-einstein-6vzr6z`, *Code → Download ZIP*, then unzip),
+   or use Git: `git clone -b claude/compassionate-einstein-6vzr6z https://github.com/howsy/howsy.git`.
+2. Open **PowerShell as administrator** in `thin-client-lab\windows` and run:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process Bypass
+   .\Connect-LabLaptop.ps1 -VmIp 192.168.142.128      # the Ubuntu VM's IP
+   ```
+   Every line should say **OK** and end with *This machine can reach the lab.*
+3. Join the domain:
+   ```powershell
+   .\Connect-LabLaptop.ps1 -VmIp 192.168.142.128 -JoinDomain
+   ```
+   Log in as `LAB\Administrator` with password `Lab-Admin-Pass1!` (from `.env`). Windows restarts.
+
+### 10.5 Turn on the call-center shell for agent1
+
+1. At the Windows login screen choose **Other user** and log in as `LAB\agent1` / `Agent-Pass1!`.
+   This first login gives the normal Windows desktop and creates agent1's profile. Sign out.
+2. Log in as `LAB\Administrator`, open PowerShell as administrator in `thin-client-lab\windows`:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process Bypass
+   .\Install-CCShell.ps1 -Config cc-shell.lab.json -TestUser LAB\agent1
+   ```
+   Sign out.
+
+### 10.6 Log in as the agent and watch
+
+Log in as `LAB\agent1` / `Agent-Pass1!`. What should happen:
+
+1. No Windows desktop, Start menu or taskbar: a dark screen for a few seconds.
+2. The call-center desktop opens **by itself with no second password**, on the left part of the
+   screen (docked layout).
+3. A few seconds later **Notepad opens on the right**: that's the "Genesys" app started on the laptop
+   by the server desktop.
+4. Minimise or click away from Notepad, then double-click **Genesys Cloud** on the server desktop:
+   Notepad comes back to the front.
+5. Log out from the server desktop (bottom-right button). The laptop asks **Reconnect?** *Yes* opens
+   a fresh desktop, still with no password. *No* signs out of Windows.
+
+Then go through tests **W-1 … W-9** in [`MANUAL_TESTS.md`](MANUAL_TESTS.md). On the Ubuntu VM,
+`./lab.sh watch-laptop` is not needed here, because the Windows machine is the laptop now.
+
+To use the real Genesys desktop app, install it on the Windows machine. Then edit
+`C:\Program Files\CallCenter\cc-shell.json` as administrator and set `Apps.genesys.Path` and
+`ProcessName` to the Genesys exe (see [`windows/README.md`](../windows/README.md)).
+
+### 10.7 If something goes wrong
+
+| Problem | Fix |
+|---|---|
+| `Connect-LabLaptop.ps1` shows FAIL lines | On the VM: `./lab.sh start`, wait a minute; check you gave `connect-laptop` **this** machine's IP (`ipconfig`). With Bridged networking the VM's IP may have changed: run both commands again. |
+| Lab names don't resolve on Windows | Disable IPv6 on the network adapter (Windows may ask an IPv6 DNS server first), then `ipconfig /flushdns`. |
+| Domain join says the domain can't be contacted | Same as above; also check the clocks of Windows and the VM agree (within 5 minutes). |
+| Black screen after agent login, nothing opens | Press Ctrl+Alt+Del → Sign out. Log in as `LAB\Administrator` and read `C:\Users\agent1\AppData\Local\CallCenter\cc-shell.log`. "401" means a Kerberos problem (clock, DNS); "403" means the user is not in `CC-Agents-Test`. |
+| A password prompt appears in the remote desktop | The one-time login was not accepted. Look at the same log, and on the VM: `docker exec cclab-broker-01 journalctl -u cc-broker -n 30`. |
+
+### 10.8 Undo everything
+
+On Windows, as administrator:
+```powershell
+.\Install-CCShell.ps1 -Remove -TestUser LAB\agent1      # agent1 gets the normal desktop back
+Remove-Computer -UnjoinDomainCredential LAB\Administrator -WorkgroupName WORKGROUP -Restart
+.\Connect-LabLaptop.ps1 -Undo                            # after the restart: route and DNS back
+```
+(Know a local administrator password before leaving the domain.) On the Ubuntu VM:
+```bash
+./lab.sh disconnect-laptop
+```

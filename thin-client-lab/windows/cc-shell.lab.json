@@ -1,0 +1,14 @@
+{
+  "BrokerUrl": "http://broker-01.lab.example.com:8088",
+  "RdpHost": "lb.lab.example.com",
+  "Domain": "LAB",
+  "RdpAuthenticationLevel": 0,
+  "Layout": "docked",
+  "GenesysWidth": 420,
+  "Apps": {
+    "genesys": {
+      "Path": "%SystemRoot%\\System32\\notepad.exe",
+      "ProcessName": "notepad"
+    }
+  }
+}

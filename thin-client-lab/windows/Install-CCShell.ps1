@@ -2,14 +2,16 @@
 #   .\Install-CCShell.ps1                       copy files only (Group Policy switches the shell)
 #   .\Install-CCShell.ps1 -TestUser LAB\agent1  also switch this one user to the shell, for a test
 #   .\Install-CCShell.ps1 -Remove -TestUser LAB\agent1   give the user the normal desktop back
-param([string]$TestUser, [switch]$Remove)
+#   -Config cc-shell.lab.json   install the settings for the simulated lab instead
+param([string]$TestUser, [switch]$Remove, [string]$Config = 'cc-shell.json')
 $ErrorActionPreference = 'Stop'
 $dest = Join-Path $env:ProgramFiles 'CallCenter'
 $shell = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$dest\CC-Shell.ps1`""
 
 if (-not $Remove) {
   New-Item -ItemType Directory -Force -Path $dest | Out-Null
-  Copy-Item -Force -Destination $dest -Path (Join-Path $PSScriptRoot 'CC-Shell.ps1'), (Join-Path $PSScriptRoot 'cc-shell.json')
+  Copy-Item -Force -Path (Join-Path $PSScriptRoot 'CC-Shell.ps1') -Destination $dest
+  Copy-Item -Force -Path (Join-Path $PSScriptRoot $Config) -Destination (Join-Path $dest 'cc-shell.json')
   # Only administrators may change what runs at agent login.
   & icacls.exe $dest /inheritance:r /grant:r 'Administrators:(OI)(CI)F' 'SYSTEM:(OI)(CI)F' 'Users:(OI)(CI)RX' | Out-Null
   Write-Host "Installed to $dest"

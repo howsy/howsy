@@ -53,6 +53,7 @@ cd howsy/thin-client-lab
 | Rebuild an endpoint from bare Ubuntu and re-test | `.\lab.ps1 golden-image` | `./lab.sh golden-image` |
 | Show the URLs and logins | `.\lab.ps1 info` | `./lab.sh info` |
 | Live view of what agent1's laptop is told to do | `.\lab.ps1 watch-laptop` | `./lab.sh watch-laptop` |
+| Let a real Windows laptop / Windows VM join the lab ([guide](docs/VMWARE.md#10-connect-a-real-windows-laptop-to-the-lab)) | | `./lab.sh connect-laptop <its-ip>` |
 | Shell inside the controller | `.\lab.ps1 shell` | `./lab.sh shell` |
 | Pause / resume (keeps the configuration) | `.\lab.ps1 stop` / `start` | `./lab.sh stop` / `start` |
 | Stop / delete everything | `.\lab.ps1 down` / `clean` | `./lab.sh down` / `clean` |
@@ -209,5 +210,5 @@ docs/MANUAL_TESTS.md      manual test scripts and results sheet
 docs/screenshots/         what the portal and desktop look like
 services/                 cc-broker, session-host helpers, Linux reference laptop agent
 windows/                  option A: CC-Shell.ps1, cc-shell.json, installer, Group Policy steps
-tools/                    genesys_call_quality.py, sessionhost_usage.py
+tools/                    genesys_call_quality.py, sessionhost_usage.py, connect-laptop.sh
 ```
