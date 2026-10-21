@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Simulated call-center lab. Needs only Docker (with Compose v2).
 #   ./lab.sh all          start, configure and test everything
-#   ./lab.sh up | provision | test | test-fast | golden-image | info | shell | down | clean
+#   ./lab.sh up | provision | test | test-fast | golden-image | info | shell | stop | start | down | clean
 #   ./lab.sh watch-laptop [user]   live view of what the agent's laptop is told to do
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -37,15 +37,17 @@ cmd=${1:-help}; shift || true
 case "$cmd" in
   up)           up ;;
   provision)    $CTL make provision ANSIBLE_ARGS="$*" ;;
-  test)         $CTL make -s ssh-key && $CTL python3 -m pytest tests "$@" ;;
-  test-fast)    $CTL make -s ssh-key && $CTL python3 -m pytest tests -m "not slow" "$@" ;;
+  test)         $CTL make -s ssh-key && $CTL python3 -m pytest "$@" ;;
+  test-fast)    $CTL make -s ssh-key && $CTL python3 -m pytest -m "not slow" "$@" ;;
   golden-image) $DC rm -sf ep-office-01 && $DC up -d --wait ep-office-01 && $CTL make golden-provision ;;
   all)          up && $CTL make provision && $CTL make test && info ;;
   info)         info ;;
   watch-laptop) user=${1:-agent1}; pw=$(sed -n 's/^AGENT_PASSWORD=//p' .env)
                 $DC exec ep-office-01 su - "$user" -c "printf '%s' '$pw' | kinit $user >/dev/null && cc-laptop-listen" ;;
   shell)        $DC exec controller bash ;;
-  down)         $DC down ;;
+  stop)         $DC stop ;;                       # pause, keeps everything configured
+  start)        $DC start && info ;;
+  down)         $DC down ;;                       # removes the machines: run provision again after up
   clean)        $DC exec -T controller rm -rf /lab/.lab 2>/dev/null || true; $DC down -v --remove-orphans ;;
   *)            sed -n '2,6p' "$0" ;;
 esac

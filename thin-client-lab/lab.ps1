@@ -1,6 +1,6 @@
 # Simulated call-center lab for Windows (Docker Desktop).
 #   powershell -ExecutionPolicy Bypass -File .\lab.ps1 all
-#   .\lab.ps1 up | provision | test | test-fast | golden-image | info | shell | down | clean
+#   .\lab.ps1 up | provision | test | test-fast | golden-image | info | shell | stop | start | down | clean
 #   .\lab.ps1 watch-laptop [user]   live view of what the agent's laptop is told to do
 param([string]$Command = "help", [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
 $ErrorActionPreference = "Stop"
@@ -46,8 +46,8 @@ Passwords come from .env. The browser will warn about the self-signed certificat
 switch ($Command) {
   "up"           { Up }
   "provision"    { Ctl @("make", "provision", "ANSIBLE_ARGS=$extra") }
-  "test"         { Ctl @("make", "-s", "ssh-key"); Ctl (@("python3", "-m", "pytest", "tests") + $Rest) }
-  "test-fast"    { Ctl @("make", "-s", "ssh-key"); Ctl (@("python3", "-m", "pytest", "tests", "-m", "not slow") + $Rest) }
+  "test"         { Ctl @("make", "-s", "ssh-key"); Ctl (@("python3", "-m", "pytest") + $Rest) }
+  "test-fast"    { Ctl @("make", "-s", "ssh-key"); Ctl (@("python3", "-m", "pytest", "-m", "not slow") + $Rest) }
   "golden-image" { Run "docker" @("compose", "rm", "-sf", "ep-office-01"); Run "docker" @("compose", "up", "-d", "--wait", "ep-office-01"); Ctl @("make", "golden-provision") }
   "all"          { Up; Ctl @("make", "provision"); Ctl @("make", "test"); Info }
   "info"         { Info }
@@ -57,6 +57,8 @@ switch ($Command) {
     docker compose exec ep-office-01 su - $user -c "printf '%s' '$pw' | kinit $user >/dev/null && cc-laptop-listen"
   }
   "shell"        { docker compose exec controller bash }
+  "stop"         { docker compose stop }
+  "start"        { docker compose start; Info }
   "down"         { docker compose down }
   "clean"        { $ErrorActionPreference = "Continue"; docker compose exec -T controller rm -rf /lab/.lab; docker compose down -v --remove-orphans }
   default        { Get-Content $PSCommandPath -TotalCount 4 | Select-Object -Skip 1 }

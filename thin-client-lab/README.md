@@ -32,6 +32,8 @@ measures.
 
 ## Run it on your computer
 
+Step-by-step for a VMware virtual machine: **[docs/VMWARE.md](docs/VMWARE.md)**.
+
 You only need **Docker**: Docker Desktop on Windows 10/11 (WSL 2 backend) or macOS, or Docker Engine
 with Compose v2 on Linux. Give Docker at least **8 GB of RAM** and about 15 GB of disk.
 Ansible, Python and the test tools run inside a `controller` container, so nothing else is
@@ -52,6 +54,7 @@ cd howsy/thin-client-lab
 | Show the URLs and logins | `.\lab.ps1 info` | `./lab.sh info` |
 | Live view of what agent1's laptop is told to do | `.\lab.ps1 watch-laptop` | `./lab.sh watch-laptop` |
 | Shell inside the controller | `.\lab.ps1 shell` | `./lab.sh shell` |
+| Pause / resume (keeps the configuration) | `.\lab.ps1 stop` / `start` | `./lab.sh stop` / `start` |
 | Stop / delete everything | `.\lab.ps1 down` / `clean` | `./lab.sh down` / `clean` |
 
 ### Look around like an agent
