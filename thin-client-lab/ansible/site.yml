@@ -1,5 +1,18 @@
 # Configures every managed machine in the lab. Same playbook for the simulated
 # lab (inventories/sim) and the real Proxmox lab (inventories/lab).
+- name: Sign the watermark extension (on the controller)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Pack and sign cc-watermark (key created on first run)
+      ansible.builtin.command: >-
+        python3 {{ playbook_dir }}/../tools/pack-crx.py {{ playbook_dir }}/../services/cc-watermark
+        {{ watermark_key_file }} {{ watermark_build_dir }}
+        --codebase {{ console_url }}/ext/cc-watermark.crx
+      register: _pack
+      changed_when: "'unchanged' not in _pack.stdout"
+
 - name: Broker - SSO tickets, open-on-laptop and the management console
   hosts: brokers
   become: true

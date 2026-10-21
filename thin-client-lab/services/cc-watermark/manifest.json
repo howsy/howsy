@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Call Center watermark",
+  "version": "1.0.0",
+  "description": "Shows who is signed in, the machine and the time over systems marked sensitive, so a photo of the screen can be traced.",
+  "permissions": ["storage", "nativeMessaging"],
+  "background": {"service_worker": "background.js"},
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_start"}],
+  "storage": {"managed_schema": "schema.json"}
+}

@@ -56,6 +56,10 @@ ROLE_GROUPS = [("admin", CONF["admin_group"]), ("helpdesk", CONF.get("helpdesk_g
                ("viewer", CONF.get("viewer_group"))]
 LEVELS = {"viewer": 0, "helpdesk": 1, "admin": 2}
 UI_FILES = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
+# The signed watermark extension, fetched by Chrome on the session hosts (public code, no secrets).
+EXT_DIR = CONF.get("ext_dir", "/usr/local/share/cc-console/ext")
+EXT_FILES = {"/ext/updates.xml": ("updates.xml", "text/xml"),
+             "/ext/cc-watermark.crx": ("cc-watermark.crx", "application/x-chrome-extension")}
 MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css"}
 
 # What an admin may ask a device to do, by device role, and the lowest IT role
@@ -478,6 +482,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, data, MIME[os.path.splitext(name)[1]])
         if p == "/healthz":
             return self.send(200, {"ok": True})
+        if p in EXT_FILES:
+            name, ctype = EXT_FILES[p]
+            try:
+                return self.send(200, open(os.path.join(EXT_DIR, name), "rb").read(), ctype)
+            except OSError:
+                return self.send(404, {"error": "extension not built"})
         if p == "/favicon.ico":
             return self.send(204, b"", "image/x-icon")
         if p == "/agent/wait":
@@ -782,7 +792,8 @@ class Handler(BaseHTTPRequestHandler):
             name, url = str(it.get("name", "")).strip(), str(it.get("url", "")).strip()
             if not name or not url.startswith(("http://", "https://")):
                 raise ValueError(f"each system needs a name and an http(s) URL ({name or url!r})")
-            items.append({"name": name[:60], "url": url[:500], "icon": str(it.get("icon") or "applications-internet")[:60]})
+            items.append({"name": name[:60], "url": url[:500], "icon": str(it.get("icon") or "applications-internet")[:60],
+                          "sensitive": bool(it.get("sensitive"))})
         v = publish_version("catalog", user, items, req.get("note"))
         audit(user, "published catalog", f"v{v}", f"{len(items)} systems, to pilot ring")
         self.send(200, {"version": v, "ring": "pilot"})

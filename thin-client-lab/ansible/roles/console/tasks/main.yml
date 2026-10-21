@@ -17,6 +17,7 @@
     - {path: /etc/cc-console, owner: root, mode: "0750"}
     - {path: /var/lib/cc-console, owner: cc-console, mode: "0750"}
     - {path: /usr/local/share/cc-console/ui, owner: root, mode: "0755"}
+    - {path: /usr/local/share/cc-console/ext, owner: root, mode: "0755"}
 
 - name: Keytab for Kerberos check-ins from laptops
   ansible.builtin.copy:
@@ -32,7 +33,7 @@
   ansible.builtin.copy:
     content: >-
       {% set out = [] %}{% for s in cc_systems %}{% set _ = out.append({'name': s.name, 'url': s.url,
-      'icon': s.icon | default('applications-internet')}) %}{% endfor %}{{ out | to_nice_json }}
+      'icon': s.icon | default('applications-internet'), 'sensitive': s.sensitive | default(false)}) %}{% endfor %}{{ out | to_nice_json }}
     dest: /etc/cc-console/seed-catalog.json
     mode: "0644"
 
@@ -63,6 +64,13 @@
     dest: "/usr/local/share/cc-console/ui/{{ item }}"
     mode: "0644"
   loop: [index.html, app.js, style.css]
+
+- name: Watermark extension served to the session hosts' Chrome
+  ansible.builtin.copy:
+    src: "{{ watermark_build_dir }}/{{ item }}"
+    dest: "/usr/local/share/cc-console/ext/{{ item }}"
+    mode: "0644"
+  loop: [cc-watermark.crx, updates.xml]
 
 - name: Console service
   ansible.builtin.copy:

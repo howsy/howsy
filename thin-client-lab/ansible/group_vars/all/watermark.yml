@@ -1,0 +1,7 @@
+# Watermark extension for systems marked sensitive in the desktop catalog.
+# Ansible signs it on the controller; the console serves it; Chrome on the
+# session hosts force-installs it. Keep the key: a new key is a new extension id.
+watermark_key_file: "{{ playbook_dir }}/../.lab/watermark-key.pem"
+watermark_build_dir: "{{ playbook_dir }}/../.lab/watermark"
+watermark_update_url: "{{ console_url }}/ext/updates.xml"
+watermark_label: CONFIDENTIAL

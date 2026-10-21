@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "sensitive": {
+      "title": "Sensitive systems",
+      "description": "URLs from the desktop catalog marked sensitive. A page gets the watermark when it has the same origin and its path starts with the URL's path.",
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "label": {"title": "Extra text on the watermark", "type": "string"}
+  }
+}

@@ -132,6 +132,7 @@ against an Ubuntu Desktop 24.04 virtual machine (VirtualBox, Hyper-V) using `ans
 | Windows laptop as viewer (option A) | `test_11_viewer`: ticket needs Kerberos, refused outside the group, single-use and bound to its user, AD passwords never sent to the broker; laptop login opens the desktop with a ticket and Genesys starts on the laptop by itself; the session's Genesys icon brings it forward on the agent's own laptop only; only allow-listed apps; closing the desktop ends the laptop session; icon per catalog system, Chrome tabs/bookmarks, no terminal/shutdown for agents, per-user CPU/RAM cap | W-1 … W-9 |
 | Management console | `test_12_console`: only CC-Admins sign in, CSRF and device-token checks, every machine reports and servers are compliant, sessions linked to laptops, live view of agent desktop and laptop (audited), message, start Genesys, timeline, allow-listed actions only, log off, catalog pilot → promote → rollback | — |
 | Console policies (URL rules, outbound firewall) | `test_14_policies`: input validated, devices report the version applied, pilot host first, agent blocked except allowed destinations while root/SSSD keep working, promote, rollback; allow-only URLs keep catalog systems and Genesys | — |
+| Watermark on sensitive systems | `test_16_watermark`: signed extension and id, console serves only it, helper returns the desktop user, sensitive flag reaches Chrome policy and rolls back | — |
 | Pilot: call quality, login time, per-user sizing | `tools/genesys_call_quality.py` (MOS by group, from the Genesys Analytics API), `tools/sessionhost_usage.py` (per-user CPU/RAM) → `tools/capacity_sizing.py` (server spec); `test_13_sizing` checks the math | L-1 … L-3 |
 
 Last full run in the simulation, from a clean start with `lab.sh`: **110 passed, 0 failed, 7 skipped**
@@ -222,8 +223,8 @@ tests/                    pytest suite, targets/{sim.yml,lab.yml.example}, app i
 docs/MANUAL_TESTS.md      manual test scripts and results sheet
 docs/ON_PREM_SIZING.md    the on-prem Proxmox server: VMs it hosts, CPU/RAM sizing from pilot numbers
 docs/screenshots/         what the portal and desktop look like
-services/                 cc-broker, cc-console (+ console-ui), cc-device-agent, desktop renderer,
+services/                 cc-broker, cc-console (+ console-ui), cc-device-agent, desktop renderer, cc-watermark (+ host),
                           session-host helpers, Linux reference laptop agent
 windows/                  option A: CC-Shell.ps1, cc-shell.json, installer, Group Policy steps
-tools/                    genesys_call_quality.py, sessionhost_usage.py, capacity_sizing.py, connect-laptop.sh
+tools/                    genesys_call_quality.py, sessionhost_usage.py, capacity_sizing.py, pack-crx.py, connect-laptop.sh
 ```

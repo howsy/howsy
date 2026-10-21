@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Native messaging host com.cc.watermark: tells the Call Center watermark
+extension which user is signed in to this desktop and on which machine. Chrome
+starts it as the desktop's own user, so the answer cannot be faked by a page."""
+import getpass
+import json
+import pwd
+import socket
+import struct
+import sys
+
+
+def main():
+    raw = sys.stdin.buffer.read(4)
+    if len(raw) == 4:
+        sys.stdin.buffer.read(struct.unpack("<I", raw)[0])     # the question; there is only one
+    user = getpass.getuser()
+    try:
+        name = pwd.getpwnam(user).pw_gecos.split(",")[0]
+    except KeyError:
+        name = ""
+    reply = json.dumps({"user": user, "name": name, "host": socket.gethostname().split(".")[0]}).encode()
+    sys.stdout.buffer.write(struct.pack("<I", len(reply)) + reply)
+    sys.stdout.buffer.flush()
+
+
+if __name__ == "__main__":
+    main()

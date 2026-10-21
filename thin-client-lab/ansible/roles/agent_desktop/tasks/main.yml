@@ -30,10 +30,48 @@
   ansible.builtin.copy:
     content: >-
       {% set out = [] %}{% for s in cc_systems %}{% set _ = out.append({'name': s.name, 'url': s.url,
-      'icon': s.icon | default('applications-internet')}) %}{% endfor %}{{ {'version': 0, 'items': out} | to_nice_json }}
+      'icon': s.icon | default('applications-internet'), 'sensitive': s.sensitive | default(false)}) %}{% endfor %}{{ {'version': 0, 'items': out} | to_nice_json }}
     dest: /etc/cc-desktop/catalog.json
     mode: "0644"
     force: false
+
+# Watermark on systems marked sensitive: the helper tells the extension who is
+# signed in (Chrome runs it as the desktop's user), and the renderer adds the
+# force-install policy and the list of sensitive systems.
+- name: Watermark helper directory
+  ansible.builtin.file:
+    path: /usr/local/lib/cc-watermark
+    state: directory
+    mode: "0755"
+
+- name: Watermark helper (native messaging host)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../services/cc-watermark-host/cc-watermark-host"
+    dest: /usr/local/lib/cc-watermark/cc-watermark-host
+    mode: "0755"
+
+- name: Native messaging directory
+  ansible.builtin.file:
+    path: /etc/opt/chrome/native-messaging-hosts
+    state: directory
+    mode: "0755"
+
+- name: Register the helper with Chrome, for the watermark extension only
+  ansible.builtin.copy:
+    content: "{{ {'name': 'com.cc.watermark', 'description': 'Call Center watermark: who is signed in',
+                 'path': '/usr/local/lib/cc-watermark/cc-watermark-host', 'type': 'stdio',
+                 'allowed_origins': ['chrome-extension://' + _wm_id + '/']} | to_nice_json }}\n"
+    dest: /etc/opt/chrome/native-messaging-hosts/com.cc.watermark.json
+    mode: "0644"
+  vars:
+    _wm_id: "{{ lookup('file', watermark_build_dir + '/extension-id') }}"
+
+- name: Watermark settings for the desktop renderer
+  ansible.builtin.copy:
+    content: "{{ {'id': lookup('file', watermark_build_dir + '/extension-id'), 'update_url': watermark_update_url,
+                 'label': watermark_label} | to_nice_json }}\n"
+    dest: /etc/cc-desktop/watermark.json
+    mode: "0644"
 
 - name: Desktop renderer (icon per system, browser tabs and bookmarks)
   ansible.builtin.copy:

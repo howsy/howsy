@@ -2,12 +2,15 @@
 """Renders the agent desktop from /etc/cc-desktop/catalog.json: one launcher per
 web system (opens it as a browser tab) and the browser policy that opens every
 system as a tab with a bookmarks bar. Used by Ansible and by cc-device-agent when
-the console publishes a new catalog version. Prints "changed" or "unchanged"."""
+the console publishes a new catalog version. Systems marked "sensitive" get a
+watermark (user, machine, time) through the cc-watermark extension. Prints
+"changed" or "unchanged"."""
 import json
 import os
 import re
 
 CATALOG = "/etc/cc-desktop/catalog.json"
+WATERMARK = "/etc/cc-desktop/watermark.json"     # {"id", "update_url", "label"} from Ansible
 LAUNCHERS = "/usr/share/cc-desktop"
 POLICY = "/etc/opt/chrome/policies/managed/cc-desktop.json"
 
@@ -54,5 +57,18 @@ policy = {
     "BookmarkBarEnabled": True,
     "ManagedBookmarks": [{"toplevel_name": "Call Center"}] + [{"name": it["name"], "url": it["url"]} for it in items],
 }
+# Watermark on systems marked sensitive: the extension is force-installed from the
+# console (users cannot disable or remove it) and only its own helper may run.
+if os.path.exists(WATERMARK):
+    wm = json.load(open(WATERMARK))
+    policy.update({
+        "ExtensionInstallForcelist": [f"{wm['id']};{wm['update_url']}"],
+        "ExtensionInstallAllowlist": [wm["id"]],
+        "NativeMessagingBlocklist": ["*"],
+        "NativeMessagingAllowlist": ["com.cc.watermark"],
+        "3rdparty": {"extensions": {wm["id"]: {
+            "sensitive": [it["url"] for it in items if it.get("sensitive")],
+            "label": wm.get("label", "CONFIDENTIAL")}}},
+    })
 changed |= write(POLICY, json.dumps(policy, indent=4, sort_keys=True) + "\n")
 print("changed" if changed else "unchanged")

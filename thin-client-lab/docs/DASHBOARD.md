@@ -20,6 +20,7 @@ it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. S
 | **Sessions**: every agent desktop on the farm, the laptop it is viewed from, Genesys running or not, CPU/RAM per agent; Watch, Message, Log off | Sessions | VDI session monitoring |
 | **Apps & desktop**: the list of web systems on the agent desktop (one icon, one browser tab and one bookmark each); edit it in the browser, publish, and the session hosts update within ~15 s, including desktops already open | Apps & desktop | Intune app assignment |
 | **Rings**: a published catalog goes to the *pilot* ring first; *Promote* sends it to *broad*. Every version is kept and can be rolled back with one click. | Apps & desktop | Intune update rings, SteamOS beta channel and A/B rollback |
+| **Watermark on sensitive systems**: tick *Watermark* on a catalog system and its pages show the signed-in user, the machine and the time across the whole page, so a phone photo of the screen can be traced. Only systems marked sensitive get it, nothing else. It cannot be switched off by the agent (force-installed Chrome extension, DevTools blocked) and it puts itself back if a page removes it. | Apps & desktop | Microsoft Purview / Citrix session watermark |
 | **Browser URL rules**: block listed sites (on top of the base lock-down) with exceptions, or *allow only* listed sites. In allow-only mode the desktop catalog's systems and Genesys are always allowed, so the agent desktop keeps working. Applies to Chrome on session hosts and Linux endpoints. | Policies | Intune / Chrome Enterprise URL blocklist |
 | **Outbound firewall**: off, or *allow only* listed destinations (IP/CIDR, TCP/UDP, ports) for the agents' own apps. Root and system services (sign-in, home folders, updates, the console) are never filtered, so a wrong rule cannot cut a device off. | Policies | Intune firewall rules, Defender network protection |
 | **Server resources per user**: CPU (100% = one core) and RAM caps for each agent's desktop on the session hosts, so one heavy user cannot slow the others; empty keeps the server default from Ansible. Applied as systemd user-slice limits, including to desktops already running. | Policies | VDI per-session resource limits |
@@ -71,6 +72,12 @@ it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. S
   internet needed).
 - `services/cc-device-agent.py` runs on Linux machines. On session hosts it also applies the catalog
   for its ring with `cc-desktop-render`.
+- Watermark: `services/cc-watermark/` is a small Chrome extension (Manifest V3). Ansible signs it on the controller
+  (`tools/pack-crx.py`, key in `.lab/watermark-key.pem`, keep it: a new key means a new extension id), the console
+  serves it at `/ext/updates.xml`, and `cc-desktop-render` adds the force-install policy plus the list of sensitive
+  systems as the extension's managed policy. `services/cc-watermark-host/` is its helper: Chrome starts it as the
+  desktop's own user to learn who is signed in, so a web page cannot fake the name, and Chrome may run no other helper
+  (`NativeMessagingBlocklist: *`).
 - Policies on session hosts and endpoints: URL rules go into an extra Chrome managed-policy file,
   `cc-urls.json`. Chrome applies the file that sorts last when two files set the same policy, so this
   one carries the base `URLBlocklist` from `cc-policy.json` plus the console's rules. The firewall is
@@ -106,6 +113,13 @@ Ansible.
 - pilot → promote → rollback changes exactly the right hosts
 - viewers can only read, helpdesk cannot reboot, log off or change configuration, and refusals are audited
 - the admin who published a version cannot promote it; a second admin can
+
+`tests/test_16_watermark.py` checks the signed package (signature and id), that the console serves only the
+extension files, that the helper answers with the desktop's user, and that marking or unmarking a system reaches
+the session host's Chrome policy through the rings. Chrome is not installed in the simulation, so the extension
+itself was checked in Chromium 141. Chromium force-installed it by policy from the update URL, a page under the
+sensitive URL got the watermark with the user from the helper, a page elsewhere did not, and removing it from a
+page script did not work.
 
 `tests/test_14_policies.py` checks the policies:
 - bad input is refused (host names instead of IPs, bad ports, allow-only with no rules, bad URL patterns), and the CSRF header is required

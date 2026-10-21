@@ -6,6 +6,7 @@ apps:
     url: http://crm.lab.example.com/
     expect: CRM
     icon: x-office-address-book
+    sensitive: true       # customer data: watermark with user, machine and time
     where: [session_hosts, office_endpoints, home_endpoints]
   - name: Knowledge Base
     url: http://crm.lab.example.com/kb.html

@@ -388,15 +388,17 @@ async function apps(reset) {
   apps.items = apps.items || current.items.map(i => ({ ...i }));
   main.innerHTML = `
     ${head("Apps &amp; desktop", `The web systems on every agent desktop: one tile, one browser tab and one bookmark each.
+      Turn on <b>Watermark</b> for systems with sensitive data: their pages show the user, machine and time, so a photo of the screen can be traced.
       Publishing goes to the <b>pilot</b> ring first; promote it to <b>broad</b> when it looks right.`, "", "apps")}
     <div class="grid cols-3-1">
       <div class="card flush editor"><div class="card-head"><h2>Systems <span class="badge b-plain">editing from v${current.version}</span></h2>
         <button id="add">${icon("plus")}Add system</button></div>
-        <div class="table-wrap"><table><thead><tr><th>Name</th><th>URL</th><th>Icon</th><th></th></tr></thead><tbody>
+        <div class="table-wrap"><table><thead><tr><th>Name</th><th>URL</th><th>Icon</th><th title="Sensitive: show a watermark with the user, machine and time">Watermark</th><th></th></tr></thead><tbody>
         ${apps.items.map((it, i) => `<tr>
           <td><input data-i="${i}" data-k="name" value="${esc(it.name)}"></td>
           <td><input data-i="${i}" data-k="url" value="${esc(it.url)}"></td>
           <td><input data-i="${i}" data-k="icon" value="${esc(it.icon || "")}" placeholder="applications-internet"></td>
+          <td><label class="switch" title="Sensitive: watermark with user, machine and time"><input type="checkbox" data-sens="${i}" ${it.sensitive ? "checked" : ""}><span></span></label></td>
           <td><button class="icon-btn danger" data-del="${i}" title="Remove">${icon("x")}</button></td></tr>`).join("")}</tbody></table></div></div>
       <div class="card flush"><div class="card-head"><h2>${icon("server")}Session hosts</h2></div>
         <div class="table-wrap"><table><tbody>${devs.filter(d => d.role === "session_host").map(d => `
@@ -408,6 +410,7 @@ async function apps(reset) {
     <div class="mt">${ringsCard("catalog", cat, v => plural(v.items.length, "system"), "Systems")}</div>`;
   main.querySelectorAll("input[data-i]").forEach(inp => inp.oninput = () => { apps.items[inp.dataset.i][inp.dataset.k] = inp.value; });
   main.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { apps.items.splice(+b.dataset.del, 1); apps(); });
+  main.querySelectorAll("[data-sens]").forEach(cb => cb.onchange = () => { apps.items[+cb.dataset.sens].sensitive = cb.checked; });
   $("#add").onclick = () => { apps.items.push({ name: "", url: "https://", icon: "applications-internet" }); apps(); };
   $("#publish").onclick = async () => {
     try {
