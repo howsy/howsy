@@ -115,11 +115,16 @@ function start(me) {
 
 // ---- routing ----------------------------------------------------------------
 const pages = { overview, devices, device, sessions, apps, policies, activity };
+// Which sidebar entry is lit for a page that has no entry of its own.
+const NAV_FALLBACK = { device: "#/devices", policies: "#/policies/browser", activity: "#/activity/events" };
 function route() {
   clearInterval(refreshTimer);
   const [, page = "overview", arg] = location.hash.split("/");
-  document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("active", a.dataset.page === page ||
-    (page === "device" && a.dataset.page === "devices")));
+  const here = location.hash || "#/overview";
+  const links = [...document.querySelectorAll(".nav a")];
+  const lit = links.find(a => a.getAttribute("href") === here) ||
+    links.find(a => a.getAttribute("href") === NAV_FALLBACK[page]);
+  links.forEach(a => a.classList.toggle("active", a === lit));
   const fn = pages[page] || overview;
   const run = () => fn(arg ? decodeURIComponent(arg) : undefined).catch(e => {
     if (e.message !== "signed out") main.innerHTML = `<div class="card alert critical">${icon("alert")}${esc(e.message)}</div>`;
@@ -161,33 +166,38 @@ async function overview() {
           <a href="#/apps">Manage →</a></div>
         <div class="ring-strip"><span class="muted" style="width:120px">Policies</span>
           <span class="ring">Pilot <b>v${s.policy?.pilot ?? "–"}</b></span><span class="ring">Broad <b>v${s.policy?.broad ?? "–"}</b></span>
-          <a href="#/policies">Manage →</a></div>
+          <a href="#/policies/rollout">Manage →</a></div>
       </div></div>`;
 }
 
 // ---- devices ------------------------------------------------------------------
-async function devices() {
+const DEVICE_PAGES = {
+  "": ["All devices", "Every machine that reports to the console.", "devices"],
+  session_host: ["Session hosts", "The servers the agents' desktops run on.", "server"],
+  endpoint: ["Endpoints", "Linux thin endpoints in the office and at home.", "devices"],
+  laptop: ["Agent laptops", "Windows laptops used as viewers, reporting while an agent is signed in.", "laptop"],
+  broker: ["Servers", "Broker and management console.", "server"],
+};
+async function devices(kind = "") {
   const list = await api("/api/devices");
-  const filter = devices.filter || "";
-  const rows = list.filter(d => !filter || d.role === filter);
+  const [title, sub, ico] = DEVICE_PAGES[kind] || DEVICE_PAGES[""];
+  const rows = list.filter(d => !kind || d.role === kind);
+  const online = rows.filter(d => d.online).length;
   main.innerHTML = `
-    ${head("Devices", "Every machine that reports to the console.",
-      `<select id="role-filter"><option value="">All roles</option>${Object.entries(ROLE).map(([k, v]) =>
-        `<option value="${k}" ${k === filter ? "selected" : ""}>${v}</option>`).join("")}</select>`)}
+    ${head(title, sub, `<span class="badge b-ok">${online} online</span><span class="badge b-plain">${rows.length} total</span>`, ico)}
     <div class="card flush"><div class="table-wrap"><table>
-      <thead><tr><th>Device</th><th>Role</th><th>Status</th><th>User / sessions</th><th>Compliance</th><th>CPU</th><th>RAM</th><th>Ring</th><th>Last seen</th></tr></thead>
+      <thead><tr><th>Device</th>${kind ? "" : "<th>Role</th>"}<th>Status</th><th>User / sessions</th><th>Compliance</th><th>CPU</th><th>RAM</th><th>Ring</th><th>Last seen</th></tr></thead>
       <tbody>${rows.map(d => { const m = d.facts.metrics || {}; return `
       <tr class="click" data-id="${esc(d.id)}">
         <td>${devCell(d)}</td>
-        <td>${ROLE[d.role] || esc(d.role)}</td><td>${onlineDot(d)}</td>
+        ${kind ? "" : `<td>${ROLE[d.role] || esc(d.role)}</td>`}<td>${onlineDot(d)}</td>
         <td>${d.role === "session_host" ? `${d.sessions.length} desktops` : esc(d.user || "–")}</td>
         <td>${stateBadge(d.compliance_state)}</td>
         <td>${meter(m.cpu)}</td><td>${meter(m.mem_pct)}</td>
         <td><span class="badge ${d.ring === "pilot" ? "b-violet" : "b-plain"}">${esc(d.ring)}</span></td>
         <td class="muted">${ago(d.last_seen)}</td></tr>`; }).join("") ||
-        `<tr><td colspan="9" class="muted">No devices yet. Agents check in every 15 seconds.</td></tr>`}</tbody>
+        `<tr><td colspan="9" class="muted">No devices here yet. Agents check in every 15 seconds.</td></tr>`}</tbody>
     </table></div></div>`;
-  $("#role-filter").onchange = e => { devices.filter = e.target.value; devices(); };
   main.querySelectorAll("tr.click").forEach(tr => tr.onclick = () => location.hash = `#/device/${encodeURIComponent(tr.dataset.id)}`);
 }
 
@@ -441,10 +451,21 @@ function limitsEditor(owner, lim, hint) {
     <label>RAM per user <span class="unit-input"><input type="number" min="0" step="256" data-lim="${owner}|mem_mb" value="${lim.mem_mb || ""}" placeholder="${hint.mem}"><span>MB</span></span></label></div>`;
 }
 
-async function policies(reset) {
+const POLICY_PAGES = {
+  browser: ["Browser rules", "globe", "Websites agents may or may not open on the session hosts and endpoints."],
+  firewall: ["Firewall", "wall", "Where agents' apps may connect. The machine itself is never blocked."],
+  resources: ["Server resources", "server", "How much of the session host one agent's desktop may use."],
+  assignments: ["Assignments", "sessions", "Different firewall and resource rules for an AD group or one user."],
+  rollout: ["Rollout & history", "rocket", "What each device has applied, the pilot and broad rings, and every version."],
+};
+const POLICY_PARTS = { browser: ["url_mode", "url_block", "url_allow"], firewall: ["egress_mode", "egress_allow"],
+  resources: ["limits"], assignments: ["assignments"] };
+
+async function policies(section) {
+  section = POLICY_PAGES[section] ? section : "browser";
+  policies.section = section;
   const data = await api("/api/policy");
   const current = data.versions.find(v => v.version === data.rings.pilot) || { policy: {} };
-  if (reset) policies.draft = null;
   const p = policies.draft = policies.draft || JSON.parse(JSON.stringify({
     url_mode: "block_listed", url_block: [], url_allow: [], egress_mode: "off", egress_allow: [],
     limits: { cpu_pct: 0, mem_mb: 0 }, assignments: [], ...current.policy }));
@@ -457,11 +478,13 @@ async function policies(reset) {
   const fwOn = p.egress_mode === "allow_only";
   const owners = { base: p };
   p.assignments.forEach((a, i) => owners[`a${i}`] = a);
-  main.innerHTML = `
-    ${head("Policies", `Rules for every agent on the session hosts and endpoints, set once here and applied by the server to
-      all users. Override them for an AD group or one person under <b>Assignments</b>. A new version goes to the <b>pilot</b> ring first.`, "", "policy")}
-    <div class="grid cols-2">
-      <div class="card"><div class="card-head"><h2>${icon("globe")}Browser · URL rules</h2>
+  const base = { url_mode: "block_listed", url_block: [], url_allow: [], egress_mode: "off", egress_allow: [],
+    limits: { cpu_pct: 0, mem_mb: 0 }, assignments: [], ...current.policy };
+  const changed = Object.entries(POLICY_PARTS).filter(([, keys]) =>
+    keys.some(k => JSON.stringify(p[k] ?? null) !== JSON.stringify(base[k] ?? null))).map(([sec]) => POLICY_PAGES[sec][0]);
+  const [title, ico, sub] = POLICY_PAGES[section];
+  const cards = {
+    browser: `<div class="card"><div class="card-head"><h2>${icon("globe")}Browser · URL rules</h2>
         <div class="seg"><button data-urlmode="block_listed" class="${allowOnly ? "" : "on"}">Block listed sites</button>
           <button data-urlmode="allow_only" class="${allowOnly ? "on" : ""}">Allow only listed sites</button></div></div>
         ${allowOnly ? `<div class="field-label">Allowed sites</div>${chips("url_allow", "allow")}
@@ -469,21 +492,20 @@ async function policies(reset) {
           : `<div class="field-label">Blocked sites</div>${chips("url_block", "block")}
              <div class="field-label">Exceptions (always allowed)</div>${chips("url_allow", "allow")}
              <div class="note">${icon("policy")}<span>Added on top of the base lock-down (no <code>file://</code>, no <code>chrome://flags</code>). Uses Chrome's URL filter format. URL rules apply to the whole machine.</span></div>`}
-      </div>
-      <div class="card"><div class="card-head"><h2>${icon("wall")}Outbound firewall · everyone</h2>
+      </div>`,
+    firewall: `<div class="card"><div class="card-head"><h2>${icon("wall")}Outbound firewall · everyone</h2>
         <div class="seg"><button data-fw="off" class="${fwOn ? "" : "on"}">Off</button>
           <button data-fw="allow_only" class="${fwOn ? "on" : ""}">Allow only listed destinations</button></div></div>
         ${fwOn ? rulesEditor("base", p.egress_allow) : `<div class="empty">Agents' apps may connect anywhere the network allows.</div>`}
-        <div class="note">${icon("policy")}<span>Only agents' own apps are filtered. The machine itself (sign-in, home folders, updates, this console) is never blocked, so a wrong rule cannot cut a device off.</span></div>
-      </div>
-    </div>
-    <div class="card mt"><div class="card-head"><h2>${icon("server")}Server resources per user · everyone</h2>
+        <div class="note">${icon("policy")}<span>Only agents' own apps are filtered. The machine itself (sign-in, home folders, updates, this console) is never blocked, so a wrong rule cannot cut a device off.
+          Different rules for a group or a person: <a href="#/policies/assignments">Assignments</a>.</span></div>
+      </div>`,
+    resources: `<div class="card"><div class="card-head"><h2>${icon("server")}Server resources per user · everyone</h2>
       <span class="muted">Each agent desktop runs on the server, never on the laptop</span></div>
       ${limitsEditor("base", p.limits || {}, { cpu: "server default (200)", mem: "server default (4096)" })}
       <div class="note">${icon("policy")}<span>Caps how much of the session host one agent's desktop can use, so one heavy user cannot slow everyone else down.
-        100% = one CPU core. Empty keeps the server's default. Size the server with <code>tools/capacity_sizing.py</code>.</span></div></div>
-
-    <div class="card mt"><div class="card-head"><h2>${icon("sessions")}Assignments · groups and users</h2>
+        100% = one CPU core. Empty keeps the server's default. Size the server with <code>tools/capacity_sizing.py</code>.</span></div></div>`,
+    assignments: `<div class="card"><div class="card-head"><h2>${icon("sessions")}Assignments · groups and users</h2>
       <button id="add-assign">${icon("plus")}Add assignment</button></div>
       <p class="muted" style="margin-top:-6px">Override the firewall and resource limits for an AD group or one user. A user assignment beats a group one;
         among groups the first in this list wins. URL rules always apply to the whole machine (Chrome on Linux has machine-wide policy only).</p>
@@ -500,12 +522,9 @@ async function policies(reset) {
             ${a.egress_mode === "inherit" ? `<div class="muted" style="margin-top:6px">Gets everyone's rules plus these destinations.</div>` : ""}</div>
           <div><div class="field-label">Server resources per user</div>
             ${limitsEditor(`a${i}`, a.limits || {}, { cpu: "same as everyone", mem: "same as everyone" })}</div>
-        </div></div>`; }).join("") || `<div class="empty">No assignments: everyone gets the rules above.</div>`}
-    </div>
-
-    <div class="publish-bar"><span class="muted">Editing from v${current.version}</span><input id="note" placeholder="What changed? (shown in the version history)">
-      <button id="discard">Discard changes</button><button class="primary" id="publish">${icon("rocket")}Publish to pilot</button></div>
-    <div class="grid cols-2 mt">
+        </div></div>`; }).join("") || `<div class="empty">No assignments: everyone gets the rules for everyone.</div>`}
+    </div>`,
+    rollout: `<div class="grid cols-2">
       <div class="card flush"><div class="card-head"><h2>${icon("devices")}Devices</h2><span class="muted">what each device has applied</span></div>
         <div class="table-wrap"><table><thead><tr><th>Device</th><th>Ring</th><th>Applied</th><th>Firewall</th><th>Assigned users</th></tr></thead><tbody>
         ${data.devices.map(d => { const a = d.applied; const want = data.rings[d.ring]; return `<tr>
@@ -517,9 +536,18 @@ async function policies(reset) {
           <td class="muted">${a && a.assigned_users && Object.keys(a.assigned_users).length ? Object.entries(a.assigned_users).map(([t, n]) => `${esc(t)}: ${n}`).join(", ") : "–"}</td></tr>`; }).join("") ||
           `<tr><td colspan="5" class="muted">No session hosts or endpoints reporting yet.</td></tr>`}</tbody></table></div></div>
       ${ringsCard("policy", data, v => `URLs ${v.policy.url_mode === "allow_only" ? "allow-only" : `${v.policy.url_block.length} blocked`} · firewall ${v.policy.egress_mode === "allow_only" ? plural(v.policy.egress_allow.length, "rule") : "off"}${(v.policy.assignments || []).length ? ` · ${plural(v.policy.assignments.length, "assignment")}` : ""}`, "Rules")}
-    </div>`;
+    </div>`,
+  };
+  main.innerHTML = `
+    ${head(title, sub, section === "rollout" ? "" : `<span class="badge b-plain">editing from v${current.version}</span>`, ico)}
+    ${cards[section]}
+    ${section === "rollout" ? "" : `<div class="publish-bar">
+      <span class="muted">${changed.length ? `Unsaved changes: <b>${changed.join(", ")}</b>` : "No changes yet"}</span>
+      <input id="note" placeholder="What changed? (shown in the version history)">
+      <button id="discard" ${changed.length ? "" : "disabled"}>Discard changes</button>
+      <button class="primary" id="publish" ${changed.length ? "" : "disabled"}>${icon("rocket")}Publish to pilot</button></div>`}`;
 
-  const redraw = () => policies();
+  const redraw = () => policies(section);
   main.querySelectorAll("[data-urlmode]").forEach(b => b.onclick = () => { p.url_mode = b.dataset.urlmode; redraw(); });
   main.querySelectorAll("[data-fw]").forEach(b => b.onclick = () => { p.egress_mode = b.dataset.fw; redraw(); });
   main.querySelectorAll("[data-unchip]").forEach(b => b.onclick = () => { const [k, i] = b.dataset.unchip.split("|"); p[k].splice(+i, 1); redraw(); });
@@ -537,38 +565,37 @@ async function policies(reset) {
   main.querySelectorAll("[data-addrl]").forEach(b => b.onclick = () => { owners[b.dataset.addrl].egress_allow.push({ name: "", dest: "", proto: "tcp", ports: "" }); redraw(); });
   main.querySelectorAll("[data-lim]").forEach(inp => inp.oninput = () => {
     const [o, k] = inp.dataset.lim.split("|"); owners[o].limits = owners[o].limits || {}; owners[o].limits[k] = +inp.value || 0; });
-  $("#add-assign").onclick = () => { p.assignments.push({ target: "group:", egress_mode: "inherit", egress_allow: [], limits: { cpu_pct: 0, mem_mb: 0 } }); redraw(); };
+  if ($("#add-assign")) $("#add-assign").onclick = () => { p.assignments.push({ target: "group:", egress_mode: "inherit", egress_allow: [], limits: { cpu_pct: 0, mem_mb: 0 } }); redraw(); };
   main.querySelectorAll("[data-akind]").forEach(s => s.onchange = () => { const a = p.assignments[+s.dataset.akind]; a.target = `${s.value}:${a.target.split(":")[1] || ""}`; redraw(); });
   main.querySelectorAll("[data-aname]").forEach(inp => inp.oninput = () => { const a = p.assignments[+inp.dataset.aname]; a.target = `${a.target.split(":")[0]}:${inp.value.trim()}`; });
   main.querySelectorAll("[data-amode]").forEach(b => b.onclick = () => { const [i, m] = b.dataset.amode.split("|"); p.assignments[+i].egress_mode = m; redraw(); });
   main.querySelectorAll("[data-adel]").forEach(b => b.onclick = () => { p.assignments.splice(+b.dataset.adel, 1); redraw(); });
   main.querySelectorAll("[data-aup]").forEach(b => b.onclick = () => { const i = +b.dataset.aup; [p.assignments[i - 1], p.assignments[i]] = [p.assignments[i], p.assignments[i - 1]]; redraw(); });
-  $("#discard").onclick = () => policies(true);
-  $("#publish").onclick = async () => {
+  const fresh = () => { policies.draft = null; policies(section); };
+  if ($("#discard")) $("#discard").onclick = fresh;
+  if ($("#publish")) $("#publish").onclick = async () => {
     try {
       const r = await api("/api/policy", { method: "POST", body: { ...p, note: $("#note").value } });
-      toast(`policies v${r.version} published to the pilot ring`); policies(true);
+      toast(`policies v${r.version} published to the pilot ring`); fresh();
     } catch (e) { toast(e.message); }
   };
-  bindRings("policy", policies);
+  if (section === "rollout") bindRings("policy", reset => { if (reset) policies.draft = null; policies(section); });
   if (!isAdmin()) readOnly("Read-only: only CC-Admins can change policies.");
 }
 
 // ---- activity -----------------------------------------------------------------
-async function activity() {
-  const tab = activity.tab || "events";
+async function activity(tab) {
+  tab = tab === "audit" ? "audit" : "events";
   const rows = tab === "events" ? await api("/api/events?limit=300") : await api("/api/audit");
-  main.innerHTML = `${head("Activity", "What happened on the devices, and what admins did.",
-      `<div class="seg"><button id="t-events" class="${tab === "events" ? "on" : ""}">Device timeline</button>
-       <button id="t-audit" class="${tab === "audit" ? "on" : ""}">Admin audit log</button></div>`)}
+  main.innerHTML = `${tab === "events"
+      ? head("Device timeline", "What happened on every device: sign-ins, desktops, apps, compliance, rollouts.", "", "activity")
+      : head("Admin audit log", "Every sign-in, action, refusal, publish, promote and rollback by IT staff.", "", "policy")}
     <div class="card flush"><div class="table-wrap"><table>${tab === "events"
       ? `<thead><tr><th>Time</th><th>Device</th><th>Kind</th><th>What happened</th><th>User</th></tr></thead><tbody>${rows.map(e => `<tr><td class="muted">${dateTime(e.ts)}</td>
          <td>${devLink(e.device)}</td><td><span class="badge b-info">${esc(e.kind)}</span></td>
          <td>${esc(e.message)}</td><td>${esc(e.user || "")}</td></tr>`).join("")}</tbody>`
       : `<thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody>${rows.map(a => `<tr><td class="muted">${dateTime(a.ts)}</td>
          <td><b>${esc(a.admin)}</b></td><td>${esc(a.action)}</td><td>${esc(a.target)}</td><td class="muted">${esc(a.detail)}</td></tr>`).join("")}</tbody>`}</table></div></div>`;
-  $("#t-events").onclick = () => { activity.tab = "events"; activity(); };
-  $("#t-audit").onclick = () => { activity.tab = "audit"; activity(); };
 }
 
 // ---- start -------------------------------------------------------------------

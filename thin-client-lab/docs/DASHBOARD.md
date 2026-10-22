@@ -11,9 +11,13 @@ it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. S
 
 ## What it does, and where the ideas come from
 
+Every area has its own entry in the sidebar, grouped under Monitor, Devices, Desktop, Policies and Audit.
+The policy pages share one draft: change Browser rules and Firewall, then publish both together from either page;
+the bar at the bottom lists which pages have unsaved changes.
+
 | Feature | Console page | Borrowed from |
 |---|---|---|
-| Inventory: every device, its role, OS, user, health, last check-in | Devices | Intune device list |
+| Inventory: every device, its role, OS, user, health, last check-in | Devices → All devices, Session hosts, Endpoints, Agent laptops, Servers | Intune device list |
 | **Compliance checks** per device: AD-joined, SSSD, security updates; on session hosts xrdp, open-on-laptop relay, per-agent CPU/RAM caps, kiosk mode, terminal restricted, no data out (clipboard, drive and printer redirection off and clipboard refused both ways); on endpoints USB storage blocked, screen lock, browser policy, no admin rights, VPN, disk encryption. Failures make the device *Not compliant*; pending updates only warn. | Device → Compliance | Intune compliance policies |
 | **Remote actions**: refresh, send message, collect logs, restart service, re-apply desktop, reboot; for laptops: start Genesys, reconnect desktop, sign out | Device → Actions | Intune remote actions |
 | **See what happens on the device**: a live view of the agent's desktop or of the laptop screen (refreshed every 2 s), and a timeline of events (logged in, desktop opened, Genesys started, came online/offline, compliance changed, catalog applied, what admins did) | Device → View screen / Watch, Timeline | Intune Remote Help, device timeline |
@@ -21,14 +25,14 @@ it. In the lab it runs on `broker-01` and opens at **http://localhost:8090/**. S
 | **Apps & desktop**: the list of web systems on the agent desktop (one icon, one browser tab and one bookmark each); edit it in the browser, publish, and the session hosts update within ~15 s, including desktops already open | Apps & desktop | Intune app assignment |
 | **Rings**: a published catalog goes to the *pilot* ring first; *Promote* sends it to *broad*. Every version is kept and can be rolled back with one click. | Apps & desktop | Intune update rings, SteamOS beta channel and A/B rollback |
 | **Watermark on sensitive systems**: tick *Watermark* on a catalog system and its pages show the signed-in user, the machine and the time across the whole page, so a phone photo of the screen can be traced. Only systems marked sensitive get it, nothing else. It cannot be switched off by the agent (force-installed Chrome extension, DevTools blocked) and it puts itself back if a page removes it. | Apps & desktop | Microsoft Purview / Citrix session watermark |
-| **Browser URL rules**: block listed sites (on top of the base lock-down) with exceptions, or *allow only* listed sites. In allow-only mode the desktop catalog's systems and Genesys are always allowed, so the agent desktop keeps working. Applies to Chrome on session hosts and Linux endpoints. | Policies | Intune / Chrome Enterprise URL blocklist |
-| **Outbound firewall**: off, or *allow only* listed destinations (IP/CIDR, TCP/UDP, ports) for the agents' own apps. Root and system services (sign-in, home folders, updates, the console) are never filtered, so a wrong rule cannot cut a device off. | Policies | Intune firewall rules, Defender network protection |
-| **Server resources per user**: CPU (100% = one core) and RAM caps for each agent's desktop on the session hosts, so one heavy user cannot slow the others; empty keeps the server default from Ansible. Applied as systemd user-slice limits, including to desktops already running. | Policies | VDI per-session resource limits |
+| **Browser URL rules**: block listed sites (on top of the base lock-down) with exceptions, or *allow only* listed sites. In allow-only mode the desktop catalog's systems and Genesys are always allowed, so the agent desktop keeps working. Applies to Chrome on session hosts and Linux endpoints. | Policies → Browser rules | Intune / Chrome Enterprise URL blocklist |
+| **Outbound firewall**: off, or *allow only* listed destinations (IP/CIDR, TCP/UDP, ports) for the agents' own apps. Root and system services (sign-in, home folders, updates, the console) are never filtered, so a wrong rule cannot cut a device off. | Policies → Firewall | Intune firewall rules, Defender network protection |
+| **Server resources per user**: CPU (100% = one core) and RAM caps for each agent's desktop on the session hosts, so one heavy user cannot slow the others; empty keeps the server default from Ansible. Applied as systemd user-slice limits, including to desktops already running. | Policies → Server resources | VDI per-session resource limits |
 | **Assignments for AD groups and users**: override the firewall (same as everyone + extra destinations, unrestricted, or allow-only) and the resource limits for an AD group or one user. A user assignment beats a group one; among groups the first listed wins. Members come from AD through SSSD, and users who sign in later pick up their group's rules within one check-in. URL rules stay machine-wide (Chrome on Linux only has machine policy). | Policies → Assignments | Intune assignment groups |
-| **Policy rings**: policies are versioned and go pilot → broad with rollback, exactly like the catalog. Each device reports the version it applied, and a failure raises an alert. | Policies | Intune update rings |
+| **Policy rings**: policies are versioned and go pilot → broad with rollback, exactly like the catalog. Each device reports the version it applied, and a failure raises an alert. | Policies → Rollout & history | Intune update rings |
 | **Capacity**: CPU history per session host, desktops per host, alerts at high CPU/RAM | Overview | — |
 | **Alerts**: offline servers (critical), offline devices, not-compliant devices, overloaded hosts | Overview | — |
-| **Audit log** of every sign-in, action, screen view, publish, promote and rollback | Activity → Admin audit log | Intune audit logs |
+| **Audit log** of every sign-in, action, screen view, publish, promote and rollback | Audit → Admin audit log | Intune audit logs |
 
 ## Privacy and safety
 

@@ -246,3 +246,8 @@ pre { white-space: pre-wrap; font-size: 12px; background: var(--bg-2); padding: 
 .switch input:checked + span { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
 .switch input:checked + span::before { transform: translateX(18px); }
 .switch input:disabled + span { opacity: .5; cursor: default; }
+
+/* ---- longer sidebar: scrolls on its own, tighter rows ------------------- */
+.nav nav { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; margin-right: -6px; padding-right: 6px; }
+.nav a { padding: 7px 12px; }
+.nav-label { padding: 12px 12px 4px; }
